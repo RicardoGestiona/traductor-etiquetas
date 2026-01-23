@@ -119,6 +119,30 @@ El sistema usa SQLite (`traductor.db`) con:
 - **cache_traducciones**: Cache global de traducciones por idioma
 - **traducciones**: Registro de sesiones de traduccion
 
+## Patrones de Codigo Criticos
+
+**IMPORTANTE - Evitar estos errores:**
+
+1. **Guardar valores originales antes de mutar objetos:**
+   ```python
+   # INCORRECTO - El valor original se pierde
+   traduccion = traducir(unit.target)
+   parser.actualizar(unit, traduccion)  # Modifica unit.target
+   cache.append((unit.target, traduccion))  # unit.target ya es la traduccion!
+
+   # CORRECTO - Guardar antes de modificar
+   texto_original = unit.target  # Guardar ANTES de actualizar
+   traduccion = traducir(texto_original)
+   parser.actualizar(unit, traduccion)
+   cache.append((texto_original, traduccion))  # Usa el valor guardado
+   ```
+
+2. **Cache de traducciones:** El campo `texto_origen` debe contener siempre el texto en idioma original (ingles), nunca el texto traducido. Verificar con:
+   ```sql
+   SELECT texto_origen, texto_traducido FROM cache_traducciones
+   WHERE idioma_destino='ca' ORDER BY fecha_creacion DESC LIMIT 5;
+   ```
+
 ## Quality Assurance
 
 **IMPORTANTE:** Antes de dar por finalizado cualquier cambio, verificar siempre:

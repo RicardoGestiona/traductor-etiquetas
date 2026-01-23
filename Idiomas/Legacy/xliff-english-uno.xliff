@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE xliff PUBLIC "-//XLIFF//DTD XLIFF//EN" "http://www.oasis-open.org/committees/xliff/documents/xliff.dtd">
+<xliff version="1.2" xmlns="urn:oasis:names:tc:xliff:document:1.2" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="urn:oasis:names:tc:xliff:document:1.2 xliff-core-1.2-strict.xsd">
+<file datatype="html" source-language="en" target-language="en" date="2025-10-23" original="xliff-english.xliff">
+<body>
+	<trans-unit id="Catalog type" extradata="CoursecatalogApp">
+		<source><![CDATA[Display modality]]></source>
+		<target><![CDATA[Display modality]]></target>
+	</trans-unit>
+	<trans-unit id="Enable users to share the view of the catalog together with all the filters applied directly from this page, by showing the corresponding button in the top right corner." extradata="CoursecatalogApp">
+		<source><![CDATA[Enable users to copy the page URL to share the link of their filtered catalogs directly from this page, by showing the corresponding button in the page top right corner.]]></source>
+		<target><![CDATA[Enable users to copy the page URL to share the link of their filtered catalogs directly from this page, by showing the corresponding button in the page top right corner.]]></target>
+	</trans-unit>
+	<trans-unit id="Generic catalog sorting direction" extradata="CoursecatalogApp">
+		<source><![CDATA[General catalog sorting direction]]></source>
+		<target><![CDATA[General catalog sorting direction]]></target>
+
+</body>
+</file>
+</xliff>

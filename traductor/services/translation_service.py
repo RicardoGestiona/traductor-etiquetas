@@ -162,9 +162,10 @@ class TranslationService:
 
             for idx, unit in enumerate(iterador, 1):
                 try:
-                    traduccion = self._traductor.traducir(unit.target)
+                    texto_original = unit.target  # Guardar antes de actualizar
+                    traduccion = self._traductor.traducir(texto_original)
                     parser.actualizar_traduccion(unit, traduccion)
-                    nuevas_traducciones.append((unit.target, traduccion))
+                    nuevas_traducciones.append((texto_original, traduccion))
 
                     # Pausa periodica
                     if idx % self.pausa_cada_n == 0:
