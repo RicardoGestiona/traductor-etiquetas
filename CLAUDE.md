@@ -9,18 +9,20 @@ Sistema de traduccion automatizada de etiquetas de Docebo (plataforma LMS) a mul
 ## Build & Development Commands
 
 ```bash
-# Sistema nuevo (recomendado)
+# Procesamiento automatico (recomendado)
+python -m traductor procesar                 # Procesa archivos en traduccion-pendiente/
+python -m traductor procesar --watch         # Modo vigilancia continua
+
+# Traduccion manual
 python -m traductor traducir archivo.xliff --idioma catalan
 python -m traductor traducir archivo.xliff --idioma catalan euskera gallego
+
+# Utilidades
 python -m traductor estadisticas
 python -m traductor listar idiomas
 
-# Migrar checkpoints legacy
-python -m traductor migrar-checkpoints
-
 # Scripts legacy (deprecados)
 python3 analizar_no_traducidas.py
-python3 aplicar_correcciones.py
 ./check.sh
 ```
 
@@ -52,6 +54,7 @@ traductor/                          # Paquete principal (nuevo sistema)
 │   └── models.py                   # Esquema de BD
 ├── services/
 │   ├── __init__.py
+│   ├── batch_processor.py          # Procesador por lotes automatico
 │   ├── incremental_detector.py     # Deteccion de etiquetas nuevas
 │   └── translation_service.py      # Servicio principal de traduccion
 └── utils/
@@ -60,15 +63,19 @@ traductor/                          # Paquete principal (nuevo sistema)
     └── logger.py                   # Sistema de logging
 
 traductor.db                        # Base de datos SQLite
-Idiomas/                            # Archivos de idiomas traducidos
+
+# Carpetas de procesamiento automatico
+traduccion-pendiente/               # Depositar archivos XLIFF aqui (siempre vacia)
+└── _procesados/                    # Archivos ya procesados
+traducidos/                         # Salida de traducciones automaticas
 ├── catalan/
 ├── euskera/
-├── gallego/
-└── ...
+└── gallego/
+
+# Carpetas legacy (archivos historicos)
+Idiomas/                            # Traducciones manuales antiguas
+└── Legacy/                         # Archivos XLIFF historicos
 legacy/                             # Checkpoints JSON migrados
-├── checkpoint_simple.json
-├── checkpoint_euskera.json
-└── checkpoint_gallego.json
 
 # Scripts auxiliares (legacy)
 analizar_no_traducidas.py
@@ -95,15 +102,26 @@ traductor_xliff.py
 - italiano (it)
 - aleman (de)
 
-## Workflow Nuevo
+## Workflow Automatico (Recomendado)
 
-1. Ejecutar traduccion con el sistema nuevo:
+1. Depositar archivo XLIFF en `traduccion-pendiente/`
+2. Ejecutar procesamiento:
    ```bash
-   python -m traductor traducir xliff-english.xliff --idioma catalan
+   python -m traductor procesar           # Una vez
+   python -m traductor procesar --watch   # Continuo
+   ```
+3. El sistema traduce automaticamente a catalan, gallego y euskera
+4. Archivos generados en `traducidos/{idioma}/YYYYMMDD-nombre-codigo.xliff`
+5. Archivo original movido a `traduccion-pendiente/_procesados/`
+
+## Workflow Manual
+
+1. Ejecutar traduccion especifica:
+   ```bash
+   python -m traductor traducir archivo.xliff --idioma catalan euskera gallego
    ```
 2. El sistema detecta automaticamente etiquetas nuevas vs cacheadas
 3. Solo traduce lo nuevo, reutiliza el cache existente
-4. Genera archivo con nomenclatura: `YYYYMMDD-nombre-idioma.xliff`
 
 ## Nomenclatura de Archivos
 

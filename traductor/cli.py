@@ -4,6 +4,7 @@
 CLI unificado para el sistema de traduccion XLIFF.
 
 Comandos disponibles:
+- procesar: Procesa archivos en traduccion-pendiente/ a catalan, gallego y euskera
 - traducir: Traduce un archivo XLIFF a uno o mas idiomas
 - migrar-checkpoints: Migra checkpoints JSON legacy a SQLite
 - estadisticas: Muestra estadisticas del sistema
@@ -20,6 +21,7 @@ from traductor.config.idiomas import listar_idiomas, obtener_config_idioma, IDIO
 from traductor.database.db_manager import DatabaseManager
 from traductor.database.migrations import CheckpointMigrator
 from traductor.services.translation_service import TranslationService
+from traductor.services.batch_processor import BatchProcessor
 from traductor.utils.logger import get_logger
 
 
@@ -73,6 +75,27 @@ def cmd_traducir(args: argparse.Namespace) -> int:
     except Exception as e:
         logger.error(f"Error: {e}")
         return 1
+
+
+def cmd_procesar(args: argparse.Namespace) -> int:
+    """Comando para procesar archivos pendientes."""
+    logger = get_logger()
+
+    processor = BatchProcessor(
+        carpeta_entrada=args.entrada,
+        carpeta_salida=args.salida,
+        db_path=args.db,
+        mover_procesados=not args.no_mover
+    )
+
+    if args.watch:
+        logger.info("Modo watcher activado")
+        processor.watch(intervalo=args.intervalo)
+        return 0
+    else:
+        resultados = processor.procesar_todos()
+        exitosos = sum(1 for r in resultados if r.exitoso)
+        return 0 if exitosos == len(resultados) or len(resultados) == 0 else 1
 
 
 def cmd_migrar_checkpoints(args: argparse.Namespace) -> int:
@@ -182,9 +205,10 @@ def crear_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Ejemplos:
+  python -m traductor procesar                    # Procesa archivos pendientes
+  python -m traductor procesar --watch            # Vigila carpeta continuamente
   python -m traductor traducir archivo.xliff --idioma catalan
   python -m traductor traducir archivo.xliff --idioma catalan euskera gallego
-  python -m traductor migrar-checkpoints
   python -m traductor estadisticas
   python -m traductor listar idiomas
         """
@@ -203,6 +227,40 @@ Ejemplos:
     )
 
     subparsers = parser.add_subparsers(dest="comando", help="Comando a ejecutar")
+
+    # Comando: procesar
+    p_procesar = subparsers.add_parser(
+        "procesar",
+        help="Procesa archivos en traduccion-pendiente/",
+        description="Traduce automaticamente archivos XLIFF a catalan, gallego y euskera"
+    )
+    p_procesar.add_argument(
+        "--watch", "-w",
+        action="store_true",
+        help="Modo vigilancia: monitorea carpeta continuamente"
+    )
+    p_procesar.add_argument(
+        "--intervalo",
+        type=int,
+        default=10,
+        help="Segundos entre verificaciones en modo watch (default: 10)"
+    )
+    p_procesar.add_argument(
+        "--entrada",
+        default="traduccion-pendiente",
+        help="Carpeta de entrada (default: traduccion-pendiente)"
+    )
+    p_procesar.add_argument(
+        "--salida",
+        default="traducidos",
+        help="Carpeta de salida (default: traducidos)"
+    )
+    p_procesar.add_argument(
+        "--no-mover",
+        action="store_true",
+        help="No mover archivos procesados a _procesados/"
+    )
+    p_procesar.set_defaults(func=cmd_procesar)
 
     # Comando: traducir
     p_traducir = subparsers.add_parser(

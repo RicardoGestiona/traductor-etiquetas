@@ -106,4 +106,26 @@ VACUUM;
 - Sesiones: 0 registros
 - Base de datos compactada con VACUUM
 
+**#014** - 00:15
+> Sube los cambios a github (rama main)
+
+*Resultado:* Commit `1a39fb0` subido a main:
+- Fix bug cache en translation_service.py
+- Reorganización archivos Legacy
+- 25 archivos modificados
+- Incluye traducciones test y reportes Excel
+
+### 2026-01-24
+
+**#015** - 18:23
+> Cambio arquitectura: carpeta traduccion-pendiente/ para entrada, traducidos/{idioma}/ para salida. Procesamiento automatico a catalan, gallego y euskera. Comando manual + watcher.
+
+*Resultado:* Implementado sistema de procesamiento por lotes:
+- Creado `traductor/services/batch_processor.py`
+- Nuevo comando: `python -m traductor procesar`
+- Opcion `--watch` para vigilancia continua
+- Carpetas creadas: `traduccion-pendiente/`, `traducidos/{catalan,gallego,euskera}/`
+- Archivos procesados se mueven a `_procesados/`
+- Actualizado CLAUDE.md con nueva arquitectura y workflows
+
 
