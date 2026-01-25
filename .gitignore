@@ -4,3 +4,12 @@ __pycache__/
 .env
 traductor.db
 *.db
+
+# Carpetas de trabajo (mantener estructura, ignorar contenido)
+traduccion-pendiente/*.xliff
+traduccion-pendiente/_procesados/
+traducidos/**/*.xliff
+
+# Reportes generados
+*.xlsx
+reporte_*

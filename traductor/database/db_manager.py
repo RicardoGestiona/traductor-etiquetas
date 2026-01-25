@@ -256,3 +256,125 @@ class DatabaseManager:
                 (idioma_destino,)
             )
             return {row["texto_origen"]: row["texto_traducido"] for row in cursor}
+
+    # ==================== TRADUCCIONES PENDIENTES ====================
+
+    def guardar_pendiente(
+        self,
+        idioma_destino: str,
+        texto_origen: str,
+        motivo_fallo: str,
+        archivo_origen: Optional[str] = None
+    ) -> None:
+        """
+        Guarda una traduccion que fallo para reintentar despues.
+
+        Args:
+            idioma_destino: Codigo del idioma destino
+            texto_origen: Texto original que no se pudo traducir
+            motivo_fallo: Descripcion del error
+            archivo_origen: Archivo XLIFF de donde proviene
+        """
+        hash_origen = self.calcular_hash(texto_origen)
+
+        with self._conexion() as conn:
+            conn.execute(
+                QUERIES["insertar_pendiente"],
+                (idioma_destino, hash_origen, texto_origen, motivo_fallo,
+                 archivo_origen, idioma_destino, hash_origen)
+            )
+
+    def guardar_lote_pendientes(
+        self,
+        idioma_destino: str,
+        pendientes: List[Tuple[str, str]],
+        archivo_origen: Optional[str] = None
+    ) -> int:
+        """
+        Guarda multiples traducciones pendientes.
+
+        Args:
+            idioma_destino: Codigo del idioma destino
+            pendientes: Lista de tuplas (texto_origen, motivo_fallo)
+            archivo_origen: Archivo XLIFF de donde provienen
+
+        Returns:
+            Numero de pendientes guardados
+        """
+        with self._conexion() as conn:
+            for texto_origen, motivo_fallo in pendientes:
+                hash_origen = self.calcular_hash(texto_origen)
+                conn.execute(
+                    QUERIES["insertar_pendiente"],
+                    (idioma_destino, hash_origen, texto_origen, motivo_fallo,
+                     archivo_origen, idioma_destino, hash_origen)
+                )
+        return len(pendientes)
+
+    def obtener_pendientes(self, idioma_destino: Optional[str] = None) -> List[Dict[str, Any]]:
+        """
+        Obtiene traducciones pendientes.
+
+        Args:
+            idioma_destino: Si se especifica, filtra por idioma
+
+        Returns:
+            Lista de traducciones pendientes
+        """
+        with self._conexion() as conn:
+            if idioma_destino:
+                cursor = conn.execute(QUERIES["obtener_pendientes"], (idioma_destino,))
+            else:
+                cursor = conn.execute(QUERIES["obtener_todas_pendientes"])
+            return [dict(row) for row in cursor]
+
+    def eliminar_pendiente(self, idioma_destino: str, texto_origen: str) -> bool:
+        """
+        Elimina una traduccion de la lista de pendientes.
+
+        Args:
+            idioma_destino: Codigo del idioma
+            texto_origen: Texto original
+
+        Returns:
+            True si se elimino, False si no existia
+        """
+        hash_origen = self.calcular_hash(texto_origen)
+
+        with self._conexion() as conn:
+            cursor = conn.execute(
+                QUERIES["eliminar_pendiente"],
+                (idioma_destino, hash_origen)
+            )
+            return cursor.rowcount > 0
+
+    def contar_pendientes(self) -> Dict[str, int]:
+        """
+        Cuenta traducciones pendientes por idioma.
+
+        Returns:
+            Diccionario {idioma: cantidad}
+        """
+        with self._conexion() as conn:
+            cursor = conn.execute(QUERIES["contar_pendientes_por_idioma"])
+            return {row["idioma_destino"]: row["total"] for row in cursor}
+
+    def limpiar_pendientes(self, idioma_destino: Optional[str] = None) -> int:
+        """
+        Limpia traducciones pendientes.
+
+        Args:
+            idioma_destino: Si se especifica, solo limpia ese idioma
+
+        Returns:
+            Numero de registros eliminados
+        """
+        with self._conexion() as conn:
+            if idioma_destino:
+                cursor = conn.execute(
+                    "DELETE FROM traducciones_pendientes WHERE idioma_destino = ?",
+                    (idioma_destino,)
+                )
+            else:
+                cursor = conn.execute("DELETE FROM traducciones_pendientes")
+            return cursor.rowcount

@@ -40,6 +40,7 @@ class ResultadoTraduccion:
     nuevas: int
     reutilizadas: int
     errores: int
+    pendientes: int
     duracion_segundos: float
     exitoso: bool
 
@@ -53,7 +54,8 @@ class TranslationService:
         base_dir_salida: str = "Idiomas",
         tipo_traductor: str = "google",
         pausa_cada_n: int = 50,
-        delay_pausa: float = 1.0
+        delay_pausa: float = 1.0,
+        guardar_cache_cada_n: int = 100
     ):
         """
         Inicializa el servicio de traduccion.
@@ -64,6 +66,7 @@ class TranslationService:
             tipo_traductor: Tipo de traductor a usar ('google', etc.)
             pausa_cada_n: Pausar cada N traducciones nuevas
             delay_pausa: Segundos de pausa
+            guardar_cache_cada_n: Guardar cache incrementalmente cada N traducciones
         """
         self.db = DatabaseManager(db_path)
         self.file_naming = FileNaming(base_dir_salida)
@@ -71,6 +74,7 @@ class TranslationService:
         self.tipo_traductor = tipo_traductor
         self.pausa_cada_n = pausa_cada_n
         self.delay_pausa = delay_pausa
+        self.guardar_cache_cada_n = guardar_cache_cada_n
         self.logger = get_logger()
 
         self._traductor: Optional[BaseTranslator] = None
@@ -140,7 +144,9 @@ class TranslationService:
 
         # Procesar traducciones
         errores = 0
+        traducciones_pendientes = []
         nuevas_traducciones = []
+        buffer_cache = []  # Buffer para guardado incremental
 
         # Aplicar traducciones desde cache
         for unit, traduccion in resultado_deteccion.etiquetas_en_cache:
@@ -161,28 +167,60 @@ class TranslationService:
                 iterador = resultado_deteccion.etiquetas_nuevas
 
             for idx, unit in enumerate(iterador, 1):
-                try:
-                    texto_original = unit.target  # Guardar antes de actualizar
-                    traduccion = self._traductor.traducir(texto_original)
-                    parser.actualizar_traduccion(unit, traduccion)
-                    nuevas_traducciones.append((texto_original, traduccion))
+                texto_original = unit.target  # Guardar ANTES de cualquier modificacion
 
-                    # Pausa periodica
+                try:
+                    traduccion = self._traductor.traducir(texto_original)
+
+                    # Validar que la traduccion no sea None ni vacia
+                    if traduccion is None or traduccion.strip() == "":
+                        # Traduccion fallida: registrar como pendiente
+                        traducciones_pendientes.append(
+                            (texto_original, "Traduccion devolvio None o vacio")
+                        )
+                        errores += 1
+                        # Mantener texto original en el archivo
+                        self.logger.warning(f"Traduccion None para: {texto_original[:50]}...")
+                    else:
+                        # Traduccion exitosa
+                        parser.actualizar_traduccion(unit, traduccion)
+                        nuevas_traducciones.append((texto_original, traduccion))
+                        buffer_cache.append((texto_original, traduccion))
+
+                        # Guardado incremental del cache
+                        if len(buffer_cache) >= self.guardar_cache_cada_n:
+                            self.db.guardar_lote_cache(config_idioma.codigo, buffer_cache)
+                            self.logger.info(f"Cache parcial guardado: {len(buffer_cache)} traducciones")
+                            buffer_cache = []
+
+                    # Pausa periodica para evitar rate limiting
                     if idx % self.pausa_cada_n == 0:
                         time.sleep(self.delay_pausa)
 
                 except Exception as e:
                     errores += 1
+                    traducciones_pendientes.append((texto_original, str(e)))
                     self.logger.error(f"Error en unidad {unit.id}: {e}")
 
                 # Progreso sin tqdm
                 if not TQDM_AVAILABLE and idx % 100 == 0:
                     self.logger.progress(idx, total_nuevas)
 
-        # Guardar nuevas traducciones en cache
-        if nuevas_traducciones:
-            self.db.guardar_lote_cache(config_idioma.codigo, nuevas_traducciones)
-            self.logger.info(f"Cache actualizado: {len(nuevas_traducciones)} traducciones")
+        # Guardar traducciones restantes en cache
+        if buffer_cache:
+            self.db.guardar_lote_cache(config_idioma.codigo, buffer_cache)
+            self.logger.info(f"Cache final guardado: {len(buffer_cache)} traducciones")
+
+        # Registrar traducciones pendientes
+        if traducciones_pendientes:
+            self.db.guardar_lote_pendientes(
+                config_idioma.codigo,
+                traducciones_pendientes,
+                archivo_entrada
+            )
+            self.logger.warning(
+                f"Registradas {len(traducciones_pendientes)} traducciones pendientes para reintentar"
+            )
 
         # Guardar archivo traducido
         self.logger.info(f"Guardando: {archivo_salida}")
@@ -213,6 +251,7 @@ class TranslationService:
             nuevas=len(nuevas_traducciones),
             reutilizadas=resultado_deteccion.total_en_cache,
             errores=errores,
+            pendientes=len(traducciones_pendientes),
             duracion_segundos=duracion,
             exitoso=errores == 0
         )
@@ -267,6 +306,8 @@ class TranslationService:
         self.logger.info(f"  Reutilizadas (cache): {resultado.reutilizadas}")
         if resultado.errores > 0:
             self.logger.info(f"  Errores: {resultado.errores}")
+        if resultado.pendientes > 0:
+            self.logger.info(f"  Pendientes (reintentar): {resultado.pendientes}")
         self.logger.info(f"  Duracion: {resultado.duracion_segundos:.1f}s")
 
     def obtener_estadisticas(self) -> dict:

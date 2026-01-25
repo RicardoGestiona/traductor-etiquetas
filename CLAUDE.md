@@ -17,13 +17,18 @@ python -m traductor procesar --watch         # Modo vigilancia continua
 python -m traductor traducir archivo.xliff --idioma catalan
 python -m traductor traducir archivo.xliff --idioma catalan euskera gallego
 
+# Gestion de traducciones pendientes (fallidas)
+python -m traductor pendientes               # Lista traducciones que fallaron
+python -m traductor pendientes --detalle     # Muestra detalle de cada pendiente
+python -m traductor reintentar               # Reintenta todas las pendientes
+python -m traductor reintentar --idioma ca   # Reintenta solo catalan
+python -m traductor limpiar-pendientes       # Elimina pendientes de la BD
+
 # Utilidades
 python -m traductor estadisticas
 python -m traductor listar idiomas
 
-# Scripts legacy (deprecados)
-python3 analizar_no_traducidas.py
-./check.sh
+# Scripts legacy (deprecados - movidos a legacy/scripts/)
 ```
 
 ## Tech Stack
@@ -75,19 +80,9 @@ traducidos/                         # Salida de traducciones automaticas
 # Carpetas legacy (archivos historicos)
 Idiomas/                            # Traducciones manuales antiguas
 └── Legacy/                         # Archivos XLIFF historicos
-legacy/                             # Checkpoints JSON migrados
-
-# Scripts auxiliares (legacy)
-analizar_no_traducidas.py
-aplicar_correcciones.py
-verificar_traducciones.py
-check.sh
-
-# Traductores legacy (deprecados - usar traductor/)
-traductor_simple.py
-traductor_euskera.py
-traductor_gallego.py
-traductor_xliff.py
+legacy/                             # Archivos legacy
+├── checkpoints/                    # Checkpoints JSON migrados
+└── scripts/                        # Scripts deprecados (traductores antiguos)
 ```
 
 ## Idiomas Soportados
@@ -136,6 +131,17 @@ Ubicacion: `Idiomas/carpeta_idioma/archivo.xliff`
 El sistema usa SQLite (`traductor.db`) con:
 - **cache_traducciones**: Cache global de traducciones por idioma
 - **traducciones**: Registro de sesiones de traduccion
+- **traducciones_pendientes**: Etiquetas que fallaron para reintentar despues
+
+### Esquema de cache_traducciones
+```sql
+(idioma_destino, hash_origen, texto_origen, texto_traducido, fecha_creacion, veces_usado)
+```
+
+### Esquema de traducciones_pendientes
+```sql
+(idioma_destino, hash_origen, texto_origen, motivo_fallo, archivo_origen, fecha_fallo, reintentos)
+```
 
 ## Patrones de Codigo Criticos
 
@@ -160,6 +166,34 @@ El sistema usa SQLite (`traductor.db`) con:
    SELECT texto_origen, texto_traducido FROM cache_traducciones
    WHERE idioma_destino='ca' ORDER BY fecha_creacion DESC LIMIT 5;
    ```
+
+3. **Validar traducciones antes de guardar:** Siempre verificar que la traduccion no sea None antes de guardar en cache:
+   ```python
+   # INCORRECTO - Puede guardar None en cache
+   traduccion = traductor.traducir(texto)
+   cache.append((texto, traduccion))
+
+   # CORRECTO - Validar antes de guardar
+   traduccion = traductor.traducir(texto)
+   if traduccion is not None and traduccion.strip():
+       cache.append((texto, traduccion))
+   else:
+       pendientes.append((texto, "Traduccion devolvio None"))
+   ```
+
+## Manejo de Errores en Traducciones
+
+El sistema maneja errores de traduccion de forma robusta:
+
+1. **Guardado incremental**: El cache se guarda cada 100 traducciones, no solo al final
+2. **Validacion de None**: Las traducciones que devuelven None se registran como pendientes
+3. **Tabla de pendientes**: Las etiquetas fallidas se guardan en `traducciones_pendientes` para reintentar
+4. **Archivo siempre generado**: El XLIFF se genera aunque haya errores (etiquetas fallidas mantienen texto original)
+
+### Verificar pendientes
+```sql
+SELECT idioma_destino, COUNT(*) FROM traducciones_pendientes GROUP BY idioma_destino;
+```
 
 ## Quality Assurance
 

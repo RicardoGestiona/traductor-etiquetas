@@ -6,6 +6,8 @@ CLI unificado para el sistema de traduccion XLIFF.
 Comandos disponibles:
 - procesar: Procesa archivos en traduccion-pendiente/ a catalan, gallego y euskera
 - traducir: Traduce un archivo XLIFF a uno o mas idiomas
+- pendientes: Lista traducciones pendientes (fallidas)
+- reintentar: Reintenta traducciones pendientes
 - migrar-checkpoints: Migra checkpoints JSON legacy a SQLite
 - estadisticas: Muestra estadisticas del sistema
 - listar: Lista traducciones e idiomas disponibles
@@ -197,6 +199,135 @@ def cmd_listar(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_pendientes(args: argparse.Namespace) -> int:
+    """Comando para listar traducciones pendientes."""
+    logger = get_logger()
+    db = DatabaseManager(args.db)
+
+    # Obtener conteo por idioma
+    conteo = db.contar_pendientes()
+
+    if not conteo:
+        logger.info("No hay traducciones pendientes.")
+        return 0
+
+    logger.info("=== Traducciones Pendientes ===\n")
+
+    total_general = 0
+    for idioma, total in conteo.items():
+        config = None
+        for nombre, cfg in IDIOMAS_SOPORTADOS.items():
+            if cfg.codigo == idioma:
+                config = cfg
+                break
+        nombre_idioma = config.nombre if config else idioma
+        logger.info(f"  {nombre_idioma} ({idioma}): {total} pendientes")
+        total_general += total
+
+    logger.info(f"\nTotal: {total_general} traducciones pendientes")
+
+    # Mostrar detalle si se solicita
+    if args.detalle:
+        idioma_filtro = args.idioma if args.idioma else None
+        pendientes = db.obtener_pendientes(idioma_filtro)
+
+        if pendientes:
+            logger.info("\nDetalle de pendientes:")
+            for p in pendientes[:args.limite]:
+                texto_corto = p['texto_origen'][:60] + "..." if len(p['texto_origen']) > 60 else p['texto_origen']
+                logger.info(f"  [{p['idioma_destino']}] {texto_corto}")
+                logger.info(f"       Motivo: {p['motivo_fallo']}")
+                logger.info(f"       Reintentos: {p['reintentos']}")
+
+    return 0
+
+
+def cmd_reintentar(args: argparse.Namespace) -> int:
+    """Comando para reintentar traducciones pendientes."""
+    from traductor.core.base_translator import crear_traductor
+
+    logger = get_logger()
+    db = DatabaseManager(args.db)
+
+    # Obtener pendientes
+    idioma_filtro = args.idioma if args.idioma else None
+    pendientes = db.obtener_pendientes(idioma_filtro)
+
+    if not pendientes:
+        logger.info("No hay traducciones pendientes para reintentar.")
+        return 0
+
+    logger.info(f"Reintentando {len(pendientes)} traducciones pendientes...\n")
+
+    # Agrupar por idioma
+    por_idioma = {}
+    for p in pendientes:
+        idioma = p['idioma_destino']
+        if idioma not in por_idioma:
+            por_idioma[idioma] = []
+        por_idioma[idioma].append(p)
+
+    total_exito = 0
+    total_fallo = 0
+
+    for idioma, lista_pendientes in por_idioma.items():
+        config = obtener_config_idioma(idioma)
+        if not config:
+            # Buscar por codigo
+            for nombre, cfg in IDIOMAS_SOPORTADOS.items():
+                if cfg.codigo == idioma:
+                    config = cfg
+                    break
+
+        if not config:
+            logger.error(f"No se encontro configuracion para idioma: {idioma}")
+            continue
+
+        logger.info(f"Procesando {len(lista_pendientes)} pendientes para {config.nombre}...")
+
+        traductor = crear_traductor(tipo="google", config_destino=config)
+
+        for p in lista_pendientes:
+            texto_origen = p['texto_origen']
+            try:
+                traduccion = traductor.traducir(texto_origen)
+
+                if traduccion and traduccion.strip() and traduccion != texto_origen:
+                    # Exito: guardar en cache y eliminar de pendientes
+                    db.guardar_en_cache(idioma, texto_origen, traduccion)
+                    db.eliminar_pendiente(idioma, texto_origen)
+                    total_exito += 1
+                    logger.info(f"  OK: {texto_origen[:40]}...")
+                else:
+                    total_fallo += 1
+                    logger.warning(f"  FALLO: {texto_origen[:40]}...")
+
+            except Exception as e:
+                total_fallo += 1
+                logger.error(f"  ERROR: {texto_origen[:40]}... - {e}")
+
+    logger.info(f"\nResultado: {total_exito} exitosas, {total_fallo} fallidas")
+
+    return 0 if total_fallo == 0 else 1
+
+
+def cmd_limpiar_pendientes(args: argparse.Namespace) -> int:
+    """Comando para limpiar traducciones pendientes."""
+    logger = get_logger()
+    db = DatabaseManager(args.db)
+
+    idioma_filtro = args.idioma if args.idioma else None
+
+    if idioma_filtro:
+        eliminados = db.limpiar_pendientes(idioma_filtro)
+        logger.info(f"Eliminadas {eliminados} traducciones pendientes de {idioma_filtro}")
+    else:
+        eliminados = db.limpiar_pendientes()
+        logger.info(f"Eliminadas {eliminados} traducciones pendientes (todos los idiomas)")
+
+    return 0
+
+
 def crear_parser() -> argparse.ArgumentParser:
     """Crea el parser de argumentos."""
     parser = argparse.ArgumentParser(
@@ -209,6 +340,10 @@ Ejemplos:
   python -m traductor procesar --watch            # Vigila carpeta continuamente
   python -m traductor traducir archivo.xliff --idioma catalan
   python -m traductor traducir archivo.xliff --idioma catalan euskera gallego
+  python -m traductor pendientes                  # Lista traducciones fallidas
+  python -m traductor pendientes --detalle        # Muestra detalle de pendientes
+  python -m traductor reintentar                  # Reintenta todas las pendientes
+  python -m traductor reintentar --idioma ca      # Reintenta solo catalan
   python -m traductor estadisticas
   python -m traductor listar idiomas
         """
@@ -337,6 +472,53 @@ Ejemplos:
         help="Directorio de traducciones (default: Idiomas)"
     )
     p_listar.set_defaults(func=cmd_listar)
+
+    # Comando: pendientes
+    p_pendientes = subparsers.add_parser(
+        "pendientes",
+        help="Lista traducciones pendientes (fallidas)",
+        description="Muestra traducciones que fallaron y estan pendientes de reintentar"
+    )
+    p_pendientes.add_argument(
+        "--idioma", "-i",
+        help="Filtrar por codigo de idioma (ej: ca, eu, gl)"
+    )
+    p_pendientes.add_argument(
+        "--detalle", "-d",
+        action="store_true",
+        help="Mostrar detalle de cada traduccion pendiente"
+    )
+    p_pendientes.add_argument(
+        "--limite", "-l",
+        type=int,
+        default=20,
+        help="Limite de registros a mostrar en detalle (default: 20)"
+    )
+    p_pendientes.set_defaults(func=cmd_pendientes)
+
+    # Comando: reintentar
+    p_reintentar = subparsers.add_parser(
+        "reintentar",
+        help="Reintenta traducciones pendientes",
+        description="Reintenta traducir las etiquetas que fallaron anteriormente"
+    )
+    p_reintentar.add_argument(
+        "--idioma", "-i",
+        help="Filtrar por codigo de idioma (ej: ca, eu, gl)"
+    )
+    p_reintentar.set_defaults(func=cmd_reintentar)
+
+    # Comando: limpiar-pendientes
+    p_limpiar = subparsers.add_parser(
+        "limpiar-pendientes",
+        help="Elimina traducciones pendientes",
+        description="Elimina traducciones pendientes de la base de datos"
+    )
+    p_limpiar.add_argument(
+        "--idioma", "-i",
+        help="Filtrar por codigo de idioma (ej: ca, eu, gl)"
+    )
+    p_limpiar.set_defaults(func=cmd_limpiar_pendientes)
 
     return parser
 

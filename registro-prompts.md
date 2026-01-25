@@ -128,4 +128,37 @@ VACUUM;
 - Archivos procesados se mueven a `_procesados/`
 - Actualizado CLAUDE.md con nueva arquitectura y workflows
 
+**#016** - 21:34
+> Mover scripts legacy a legacy/scripts/
+
+*Resultado:* Movidos 10 scripts a `legacy/scripts/`:
+- 8 scripts Python (traductores antiguos, analizadores, etc.)
+- 2 scripts Shell (check.sh, instalar.sh)
+- Raíz del proyecto limpia
+
+**#017** - 21:40
+> Sube los cambios a github (rama main)
+
+*Resultado:* Commit `603b738` subido a main:
+- Nuevo batch_processor.py para procesamiento automático
+- 10 scripts movidos a legacy/scripts/
+- 18 archivos modificados
+
+### 2026-01-25
+
+**#018** - 14:45
+> Corregir error "NOT NULL constraint failed: cache_traducciones.texto_traducido". Implementar: (1) Filtrar traducciones con valor None, (2) Guardar cache incrementalmente, (3) Generar archivo XLIFF aunque algunas traducciones fallen, (4) Crear tabla traducciones_pendientes para etiquetas fallidas. Documentar cambios, limpiar archivos innecesarios y subir a GitHub.
+
+*Resultado:* Implementacion completa:
+- Nueva tabla `traducciones_pendientes` en models.py (schema v1.1.0)
+- Metodos en db_manager.py: guardar_pendiente, guardar_lote_pendientes, obtener_pendientes, eliminar_pendiente, contar_pendientes, limpiar_pendientes
+- translation_service.py modificado:
+  - Guardado incremental cada 100 traducciones (configurable)
+  - Validacion de None antes de guardar en cache
+  - Registro de etiquetas fallidas en traducciones_pendientes
+  - Archivo XLIFF se genera siempre (fallidas mantienen texto original)
+- Nuevos comandos CLI: pendientes, reintentar, limpiar-pendientes
+- .gitignore actualizado para ignorar archivos de trabajo
+- .gitkeep en carpetas de estructura
+- CLAUDE.md actualizado con nueva documentacion
 

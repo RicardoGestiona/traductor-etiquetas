@@ -59,9 +59,29 @@ CREATE TABLE IF NOT EXISTS metadatos (
     fecha_actualizacion DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Tabla de traducciones pendientes (etiquetas que fallaron)
+CREATE TABLE IF NOT EXISTS traducciones_pendientes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    idioma_destino TEXT NOT NULL,
+    hash_origen TEXT NOT NULL,
+    texto_origen TEXT NOT NULL,
+    motivo_fallo TEXT,
+    archivo_origen TEXT,
+    fecha_fallo DATETIME DEFAULT CURRENT_TIMESTAMP,
+    reintentos INTEGER DEFAULT 1,
+    UNIQUE(idioma_destino, hash_origen)
+);
+
+-- Indices para traducciones pendientes
+CREATE INDEX IF NOT EXISTS idx_pendientes_idioma
+ON traducciones_pendientes(idioma_destino);
+
+CREATE INDEX IF NOT EXISTS idx_pendientes_fecha
+ON traducciones_pendientes(fecha_fallo);
+
 -- Insertar version del esquema
 INSERT OR REPLACE INTO metadatos (clave, valor)
-VALUES ('schema_version', '1.0.0');
+VALUES ('schema_version', '1.1.0');
 """
 
 # Consultas SQL frecuentes
@@ -129,5 +149,36 @@ QUERIES = {
         SELECT * FROM traducciones
         ORDER BY fecha_traduccion DESC
         LIMIT ?
+    """,
+
+    # Traducciones pendientes
+    "insertar_pendiente": """
+        INSERT OR REPLACE INTO traducciones_pendientes
+        (idioma_destino, hash_origen, texto_origen, motivo_fallo, archivo_origen, reintentos)
+        VALUES (?, ?, ?, ?, ?,
+            COALESCE((SELECT reintentos + 1 FROM traducciones_pendientes
+                      WHERE idioma_destino = ? AND hash_origen = ?), 1))
+    """,
+
+    "obtener_pendientes": """
+        SELECT * FROM traducciones_pendientes
+        WHERE idioma_destino = ?
+        ORDER BY fecha_fallo DESC
+    """,
+
+    "obtener_todas_pendientes": """
+        SELECT * FROM traducciones_pendientes
+        ORDER BY idioma_destino, fecha_fallo DESC
+    """,
+
+    "eliminar_pendiente": """
+        DELETE FROM traducciones_pendientes
+        WHERE idioma_destino = ? AND hash_origen = ?
+    """,
+
+    "contar_pendientes_por_idioma": """
+        SELECT idioma_destino, COUNT(*) as total
+        FROM traducciones_pendientes
+        GROUP BY idioma_destino
     """,
 }
