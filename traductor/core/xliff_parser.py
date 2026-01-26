@@ -84,6 +84,8 @@ class XLIFFParser:
         """
         Extrae todas las unidades de traduccion.
 
+        Soporta etiquetas target que abarcan multiples lineas.
+
         Args:
             lineas: Lista de lineas del archivo
 
@@ -91,34 +93,46 @@ class XLIFFParser:
             Lista de TransUnit
         """
         trans_units = []
-        trans_unit_id = None
+        contenido_completo = '\n'.join(lineas)
 
-        for idx, linea in enumerate(lineas):
-            # Detectar inicio de trans-unit
-            if '<trans-unit' in linea:
-                match = self.PATTERN_TRANS_UNIT_ID.search(linea)
-                if match:
-                    trans_unit_id = match.group(1)
+        # Paso 1: Encontrar todos los trans-unit IDs y sus posiciones
+        trans_unit_positions = []
+        for match in self.PATTERN_TRANS_UNIT_ID.finditer(contenido_completo):
+            trans_unit_positions.append((match.start(), match.group(1)))
 
-            # Detectar target con CDATA
-            if '<target>' in linea and '<![CDATA[' in linea:
-                match = self.PATTERN_TARGET_CDATA.search(linea)
-                if match:
-                    texto_target = match.group(2)
-                    trans_unit = TransUnit(
-                        id=trans_unit_id or f'line_{idx}',
-                        source=texto_target,  # En este formato, source == target inicial
-                        target=texto_target,
-                        linea_idx=idx,
-                        linea_original=linea
-                    )
-                    trans_units.append(trans_unit)
+        # Paso 2: Encontrar todos los targets con CDATA (patron mas eficiente)
+        pattern_target = re.compile(r'<target><!\[CDATA\[(.*?)\]\]></target>', re.DOTALL)
+
+        for match in pattern_target.finditer(contenido_completo):
+            texto_target = match.group(1)
+            target_pos = match.start()
+
+            # Encontrar el trans-unit ID mas cercano anterior a este target
+            trans_unit_id = None
+            for pos, unit_id in reversed(trans_unit_positions):
+                if pos < target_pos:
+                    trans_unit_id = unit_id
+                    break
+
+            # Calcular numero de linea contando saltos de linea
+            linea_idx = contenido_completo[:target_pos].count('\n')
+
+            trans_unit = TransUnit(
+                id=trans_unit_id or f'pos_{target_pos}',
+                source=texto_target,
+                target=texto_target,
+                linea_idx=linea_idx,
+                linea_original=f'<target><![CDATA[{texto_target}]]></target>'
+            )
+            trans_units.append(trans_unit)
 
         return trans_units
 
     def actualizar_traduccion(self, trans_unit: TransUnit, nueva_traduccion: str) -> None:
         """
         Actualiza la traduccion de una unidad en el documento.
+
+        Soporta etiquetas target que abarcan multiples lineas.
 
         Args:
             trans_unit: Unidad a actualizar
@@ -127,15 +141,17 @@ class XLIFFParser:
         if self._documento is None:
             raise ValueError("No hay documento cargado")
 
-        linea_original = self._documento.lineas[trans_unit.linea_idx]
+        # Reconstruir contenido completo
+        contenido = '\n'.join(self._documento.lineas)
 
-        # Reemplazar el contenido CDATA
-        nueva_linea = linea_original.replace(
-            f'<target><![CDATA[{trans_unit.target}]]></target>',
-            f'<target><![CDATA[{nueva_traduccion}]]></target>'
-        )
+        # Reemplazar el target original por el nuevo
+        target_original = f'<target><![CDATA[{trans_unit.target}]]></target>'
+        target_nuevo = f'<target><![CDATA[{nueva_traduccion}]]></target>'
 
-        self._documento.lineas[trans_unit.linea_idx] = nueva_linea
+        contenido = contenido.replace(target_original, target_nuevo, 1)
+
+        # Actualizar las lineas
+        self._documento.lineas = contenido.split('\n')
         trans_unit.target = nueva_traduccion
 
     def guardar(self, ruta_salida: str) -> None:
