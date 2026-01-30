@@ -101,7 +101,7 @@ class TranslationService:
         """
         inicio = time.time()
         config_idioma = self._validar_y_obtener_config(idioma_destino)
-        parser = self._preparar_documento(archivo_entrada, archivo_salida, config_idioma)
+        parser, archivo_salida = self._preparar_documento(archivo_entrada, archivo_salida, config_idioma)
         resultado_deteccion = self._analizar_traducciones_necesarias(
             parser, config_idioma, forzar_retraduccion
         )
@@ -137,7 +137,7 @@ class TranslationService:
         archivo_entrada: str,
         archivo_salida: Optional[str],
         config_idioma: ConfigIdioma
-    ) -> XLIFFParser:
+    ) -> tuple:
         """Carga, parsea y prepara documento XLIFF."""
         if archivo_salida is None:
             archivo_salida = self.file_naming.generar_nombre_salida(
@@ -149,7 +149,7 @@ class TranslationService:
         parser = XLIFFParser()
         doc = parser.cargar(archivo_entrada)
         self.logger.info(f"Total de unidades: {doc.total_unidades}")
-        return parser
+        return parser, archivo_salida
 
     def _analizar_traducciones_necesarias(
         self,
