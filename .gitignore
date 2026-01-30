@@ -12,4 +12,7 @@ traducidos/**/*.xliff
 
 # Reportes generados
 *.xlsx
-reporte_*
+reporte_
+
+# Instrucciones locales del proyecto (confidencial)
+CLAUDE.local.md*
