@@ -89,30 +89,13 @@ class BatchProcessor:
         self.logger.info(f"Procesando: {archivo.name}")
         self.logger.info(f"{'='*60}")
 
-        idiomas_ok = []
-        errores = []
-
         service = TranslationService(
             db_path=self.db_path,
             base_dir_salida=str(self.carpeta_salida)
         )
 
-        for idioma in self.IDIOMAS_DESTINO:
-            try:
-                self.logger.info(f"\n>>> Traduciendo a {idioma}...")
-                resultado = service.traducir(
-                    str(archivo),
-                    idioma
-                )
-                if resultado.exitoso:
-                    idiomas_ok.append(idioma)
-                else:
-                    errores.append(f"{idioma}: traducción con errores")
-            except Exception as e:
-                errores.append(f"{idioma}: {str(e)}")
-                self.logger.error(f"Error traduciendo a {idioma}: {e}")
+        idiomas_ok, errores = self._traducir_a_todos_idiomas(archivo, service)
 
-        # Mover archivo procesado
         if self.mover_procesados and len(idiomas_ok) == len(self.IDIOMAS_DESTINO):
             self._mover_a_procesados(archivo)
 
@@ -122,6 +105,30 @@ class BatchProcessor:
             exitoso=len(errores) == 0,
             errores=errores
         )
+
+    def _traducir_a_todos_idiomas(
+        self,
+        archivo: Path,
+        service: TranslationService
+    ) -> tuple:
+        """Traduce archivo a todos los idiomas destino."""
+        idiomas_ok = []
+        errores = []
+
+        for idioma in self.IDIOMAS_DESTINO:
+            try:
+                self.logger.info(f"\n>>> Traduciendo a {idioma}...")
+                resultado = service.traducir(str(archivo), idioma)
+
+                if resultado.exitoso:
+                    idiomas_ok.append(idioma)
+                else:
+                    errores.append(f"{idioma}: traducción con errores")
+            except Exception as e:
+                errores.append(f"{idioma}: {str(e)}")
+                self.logger.error(f"Error traduciendo a {idioma}: {e}")
+
+        return idiomas_ok, errores
 
     def _mover_a_procesados(self, archivo: Path) -> None:
         """Mueve un archivo a la carpeta de procesados."""

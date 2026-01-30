@@ -72,30 +72,35 @@ class IncrementalDetector:
         if parser.documento is None:
             raise ValueError("El parser no tiene documento cargado")
 
-        # Obtener cache existente para el idioma
         cache = self.db.obtener_todo_cache(idioma_destino)
-
-        etiquetas_nuevas = []
-        etiquetas_en_cache = []
-        etiquetas_modificadas = []
-
-        for unit in parser.iterar_unidades():
-            hash_texto = self.db.calcular_hash(unit.target)
-
-            if hash_texto in cache:
-                # Ya existe en cache
-                traduccion_cacheada = cache[hash_texto]
-                etiquetas_en_cache.append((unit, traduccion_cacheada))
-            else:
-                # Nueva etiqueta
-                etiquetas_nuevas.append(unit)
+        etiquetas_nuevas, etiquetas_en_cache = self._clasificar_etiquetas(parser, cache)
 
         return ResultadoDeteccion(
             total_etiquetas=parser.total_unidades,
             etiquetas_nuevas=etiquetas_nuevas,
             etiquetas_en_cache=etiquetas_en_cache,
-            etiquetas_modificadas=etiquetas_modificadas
+            etiquetas_modificadas=[]
         )
+
+    def _clasificar_etiquetas(
+        self,
+        parser: XLIFFParser,
+        cache: dict
+    ) -> Tuple[List[TransUnit], List[Tuple[TransUnit, str]]]:
+        """Clasifica etiquetas en nuevas o en cache."""
+        etiquetas_nuevas = []
+        etiquetas_en_cache = []
+
+        for unit in parser.iterar_unidades():
+            hash_texto = self.db.calcular_hash(unit.target)
+
+            if hash_texto in cache:
+                traduccion_cacheada = cache[hash_texto]
+                etiquetas_en_cache.append((unit, traduccion_cacheada))
+            else:
+                etiquetas_nuevas.append(unit)
+
+        return etiquetas_nuevas, etiquetas_en_cache
 
     def comparar_archivos(
         self,
@@ -112,30 +117,43 @@ class IncrementalDetector:
         Returns:
             Diccionario con listas de IDs nuevos, eliminados y modificados
         """
+        doc_nuevo, doc_anterior = self._cargar_y_extraer_ids(archivo_nuevo, archivo_anterior)
+
+        ids_nuevo = {unit.id for unit in doc_nuevo.trans_units}
+        ids_anterior = {unit.id for unit in doc_anterior.trans_units}
+        contenido_nuevo = {unit.id: unit.target for unit in doc_nuevo.trans_units}
+        contenido_anterior = {unit.id: unit.target for unit in doc_anterior.trans_units}
+
+        return self._detectar_diferencias(
+            ids_nuevo, ids_anterior, contenido_nuevo, contenido_anterior
+        )
+
+    def _cargar_y_extraer_ids(self, archivo_nuevo: str, archivo_anterior: str) -> Tuple:
+        """Carga dos archivos XLIFF."""
         parser_nuevo = XLIFFParser()
         parser_anterior = XLIFFParser()
 
         doc_nuevo = parser_nuevo.cargar(archivo_nuevo)
         doc_anterior = parser_anterior.cargar(archivo_anterior)
 
-        # Crear conjuntos de IDs
-        ids_nuevo = {unit.id for unit in doc_nuevo.trans_units}
-        ids_anterior = {unit.id for unit in doc_anterior.trans_units}
+        return doc_nuevo, doc_anterior
 
-        # Crear mapas de contenido
-        contenido_nuevo = {unit.id: unit.target for unit in doc_nuevo.trans_units}
-        contenido_anterior = {unit.id: unit.target for unit in doc_anterior.trans_units}
-
-        # Detectar diferencias
+    def _detectar_diferencias(
+        self,
+        ids_nuevo: Set[str],
+        ids_anterior: Set[str],
+        contenido_nuevo: Dict[str, str],
+        contenido_anterior: Dict[str, str]
+    ) -> Dict[str, List[str]]:
+        """Calcula diferencias entre conjuntos de IDs."""
         nuevos = ids_nuevo - ids_anterior
         eliminados = ids_anterior - ids_nuevo
         comunes = ids_nuevo & ids_anterior
 
-        # Detectar modificados
-        modificados = []
-        for id_unit in comunes:
-            if contenido_nuevo.get(id_unit) != contenido_anterior.get(id_unit):
-                modificados.append(id_unit)
+        modificados = [
+            id_unit for id_unit in comunes
+            if contenido_nuevo.get(id_unit) != contenido_anterior.get(id_unit)
+        ]
 
         return {
             "nuevos": list(nuevos),

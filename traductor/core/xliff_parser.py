@@ -92,41 +92,52 @@ class XLIFFParser:
         Returns:
             Lista de TransUnit
         """
-        trans_units = []
         contenido_completo = '\n'.join(lineas)
-
-        # Paso 1: Encontrar todos los trans-unit IDs y sus posiciones
-        trans_unit_positions = []
-        for match in self.PATTERN_TRANS_UNIT_ID.finditer(contenido_completo):
-            trans_unit_positions.append((match.start(), match.group(1)))
-
-        # Paso 2: Encontrar todos los targets con CDATA (patron mas eficiente)
+        trans_unit_positions = self._encontrar_trans_unit_positions(contenido_completo)
         pattern_target = re.compile(r'<target><!\[CDATA\[(.*?)\]\]></target>', re.DOTALL)
 
+        trans_units = []
         for match in pattern_target.finditer(contenido_completo):
-            texto_target = match.group(1)
-            target_pos = match.start()
-
-            # Encontrar el trans-unit ID mas cercano anterior a este target
-            trans_unit_id = None
-            for pos, unit_id in reversed(trans_unit_positions):
-                if pos < target_pos:
-                    trans_unit_id = unit_id
-                    break
-
-            # Calcular numero de linea contando saltos de linea
-            linea_idx = contenido_completo[:target_pos].count('\n')
-
-            trans_unit = TransUnit(
-                id=trans_unit_id or f'pos_{target_pos}',
-                source=texto_target,
-                target=texto_target,
-                linea_idx=linea_idx,
-                linea_original=f'<target><![CDATA[{texto_target}]]></target>'
+            unit = self._asociar_target_con_unit(
+                match, contenido_completo, trans_unit_positions
             )
-            trans_units.append(trans_unit)
+            trans_units.append(unit)
 
         return trans_units
+
+    def _encontrar_trans_unit_positions(self, contenido: str) -> List[Tuple[int, str]]:
+        """Encuentra todas las posiciones de trans-unit IDs."""
+        positions = []
+        for match in self.PATTERN_TRANS_UNIT_ID.finditer(contenido):
+            positions.append((match.start(), match.group(1)))
+        return positions
+
+    def _asociar_target_con_unit(
+        self,
+        target_match,
+        contenido_completo: str,
+        trans_unit_positions: List[Tuple[int, str]]
+    ) -> TransUnit:
+        """Asocia un target con su trans-unit ID."""
+        texto_target = target_match.group(1)
+        target_pos = target_match.start()
+
+        # Encontrar trans-unit ID mas cercano anterior
+        trans_unit_id = None
+        for pos, unit_id in reversed(trans_unit_positions):
+            if pos < target_pos:
+                trans_unit_id = unit_id
+                break
+
+        linea_idx = contenido_completo[:target_pos].count('\n')
+
+        return TransUnit(
+            id=trans_unit_id or f'pos_{target_pos}',
+            source=texto_target,
+            target=texto_target,
+            linea_idx=linea_idx,
+            linea_original=f'<target><![CDATA[{texto_target}]]></target>'
+        )
 
     def actualizar_traduccion(self, trans_unit: TransUnit, nueva_traduccion: str) -> None:
         """

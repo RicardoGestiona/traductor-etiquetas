@@ -100,118 +100,164 @@ class TranslationService:
             ResultadoTraduccion con estadisticas
         """
         inicio = time.time()
+        config_idioma = self._validar_y_obtener_config(idioma_destino)
+        parser = self._preparar_documento(archivo_entrada, archivo_salida, config_idioma)
+        resultado_deteccion = self._analizar_traducciones_necesarias(
+            parser, config_idioma, forzar_retraduccion
+        )
 
-        # Obtener configuracion del idioma
-        config_idioma = obtener_config_idioma(idioma_destino)
-        if config_idioma is None:
-            raise ValueError(f"Idioma no soportado: {idioma_destino}")
-
-        self.logger.info(f"Traduciendo a {config_idioma.nombre}...")
-
-        # Determinar archivo de salida
-        if archivo_salida is None:
-            archivo_salida = self.file_naming.generar_nombre_salida(
-                archivo_entrada, config_idioma
-            )
-
-        # Asegurar directorio de salida
-        self.file_naming.asegurar_directorio(archivo_salida)
-
-        # Cargar y parsear archivo
-        self.logger.info(f"Cargando: {archivo_entrada}")
-        parser = XLIFFParser()
-        doc = parser.cargar(archivo_entrada)
-        self.logger.info(f"Total de unidades: {doc.total_unidades}")
-
-        # Analizar que necesita traduccion
-        if forzar_retraduccion:
-            # Traducir todo
-            resultado_deteccion = ResultadoDeteccion(
-                total_etiquetas=doc.total_unidades,
-                etiquetas_nuevas=list(parser.iterar_unidades()),
-                etiquetas_en_cache=[],
-                etiquetas_modificadas=[]
-            )
-        else:
-            resultado_deteccion = self.detector.analizar(parser, config_idioma.codigo)
-            self.logger.info(self.detector.generar_resumen(resultado_deteccion))
-
-        # Inicializar traductor
         self._traductor = crear_traductor(
             tipo=self.tipo_traductor,
             config_destino=config_idioma
         )
 
-        # Procesar traducciones
-        errores = 0
-        traducciones_pendientes = []
-        nuevas_traducciones = []
-        buffer_cache = []  # Buffer para guardado incremental
+        self._aplicar_cache(parser, resultado_deteccion)
+        traducciones_pendientes, nuevas_traducciones = self._traducir_nuevas(
+            parser, resultado_deteccion, config_idioma
+        )
 
-        # Aplicar traducciones desde cache
+        resultado = self._finalizar_traduccion(
+            parser, resultado_deteccion, config_idioma, archivo_entrada, archivo_salida,
+            traducciones_pendientes, nuevas_traducciones, inicio, time.time()
+        )
+
+        self._mostrar_resumen(resultado)
+        return resultado
+
+    def _validar_y_obtener_config(self, idioma_destino: str) -> ConfigIdioma:
+        """Valida idioma y retorna configuracion."""
+        config_idioma = obtener_config_idioma(idioma_destino)
+        if config_idioma is None:
+            raise ValueError(f"Idioma no soportado: {idioma_destino}")
+        self.logger.info(f"Traduciendo a {config_idioma.nombre}...")
+        return config_idioma
+
+    def _preparar_documento(
+        self,
+        archivo_entrada: str,
+        archivo_salida: Optional[str],
+        config_idioma: ConfigIdioma
+    ) -> XLIFFParser:
+        """Carga, parsea y prepara documento XLIFF."""
+        if archivo_salida is None:
+            archivo_salida = self.file_naming.generar_nombre_salida(
+                archivo_entrada, config_idioma
+            )
+        self.file_naming.asegurar_directorio(archivo_salida)
+
+        self.logger.info(f"Cargando: {archivo_entrada}")
+        parser = XLIFFParser()
+        doc = parser.cargar(archivo_entrada)
+        self.logger.info(f"Total de unidades: {doc.total_unidades}")
+        return parser
+
+    def _analizar_traducciones_necesarias(
+        self,
+        parser: XLIFFParser,
+        config_idioma: ConfigIdioma,
+        forzar_retraduccion: bool
+    ) -> ResultadoDeteccion:
+        """Analiza que etiquetas necesitan traduccion."""
+        if forzar_retraduccion:
+            return ResultadoDeteccion(
+                total_etiquetas=parser.doc.total_unidades,
+                etiquetas_nuevas=list(parser.iterar_unidades()),
+                etiquetas_en_cache=[],
+                etiquetas_modificadas=[]
+            )
+        else:
+            resultado = self.detector.analizar(parser, config_idioma.codigo)
+            self.logger.info(self.detector.generar_resumen(resultado))
+            return resultado
+
+    def _aplicar_cache(
+        self,
+        parser: XLIFFParser,
+        resultado_deteccion: ResultadoDeteccion
+    ) -> None:
+        """Aplica traducciones desde cache."""
         for unit, traduccion in resultado_deteccion.etiquetas_en_cache:
             parser.actualizar_traduccion(unit, traduccion)
 
-        # Traducir etiquetas nuevas
+    def _traducir_nuevas(
+        self,
+        parser: XLIFFParser,
+        resultado_deteccion: ResultadoDeteccion,
+        config_idioma: ConfigIdioma
+    ) -> tuple:
+        """Traduce etiquetas nuevas con barra de progreso."""
+        errores = 0
+        traducciones_pendientes = []
+        nuevas_traducciones = []
+        buffer_cache = []
+
         total_nuevas = resultado_deteccion.total_nuevas
-        if total_nuevas > 0:
-            self.logger.info(f"Traduciendo {total_nuevas} etiquetas nuevas...")
+        if total_nuevas == 0:
+            return traducciones_pendientes, nuevas_traducciones
 
-            if TQDM_AVAILABLE:
-                iterador = tqdm(
-                    resultado_deteccion.etiquetas_nuevas,
-                    desc="Traduciendo",
-                    unit=" etiquetas"
-                )
-            else:
-                iterador = resultado_deteccion.etiquetas_nuevas
+        self.logger.info(f"Traduciendo {total_nuevas} etiquetas nuevas...")
 
-            for idx, unit in enumerate(iterador, 1):
-                texto_original = unit.target  # Guardar ANTES de cualquier modificacion
+        if TQDM_AVAILABLE:
+            iterador = tqdm(
+                resultado_deteccion.etiquetas_nuevas,
+                desc="Traduciendo",
+                unit=" etiquetas"
+            )
+        else:
+            iterador = resultado_deteccion.etiquetas_nuevas
 
-                try:
-                    traduccion = self._traductor.traducir(texto_original)
+        for idx, unit in enumerate(iterador, 1):
+            texto_original = unit.target
 
-                    # Validar que la traduccion no sea None ni vacia
-                    if traduccion is None or traduccion.strip() == "":
-                        # Traduccion fallida: registrar como pendiente
-                        traducciones_pendientes.append(
-                            (texto_original, "Traduccion devolvio None o vacio")
-                        )
-                        errores += 1
-                        # Mantener texto original en el archivo
-                        self.logger.warning(f"Traduccion None para: {texto_original[:50]}...")
-                    else:
-                        # Traduccion exitosa
-                        parser.actualizar_traduccion(unit, traduccion)
-                        nuevas_traducciones.append((texto_original, traduccion))
-                        buffer_cache.append((texto_original, traduccion))
+            try:
+                traduccion = self._traductor.traducir(texto_original)
 
-                        # Guardado incremental del cache
-                        if len(buffer_cache) >= self.guardar_cache_cada_n:
-                            self.db.guardar_lote_cache(config_idioma.codigo, buffer_cache)
-                            self.logger.info(f"Cache parcial guardado: {len(buffer_cache)} traducciones")
-                            buffer_cache = []
-
-                    # Pausa periodica para evitar rate limiting
-                    if idx % self.pausa_cada_n == 0:
-                        time.sleep(self.delay_pausa)
-
-                except Exception as e:
+                if traduccion is None or traduccion.strip() == "":
+                    traducciones_pendientes.append(
+                        (texto_original, "Traduccion devolvio None o vacio")
+                    )
                     errores += 1
-                    traducciones_pendientes.append((texto_original, str(e)))
-                    self.logger.error(f"Error en unidad {unit.id}: {e}")
+                    self.logger.warning(f"Traduccion None para: {texto_original[:50]}...")
+                else:
+                    parser.actualizar_traduccion(unit, traduccion)
+                    nuevas_traducciones.append((texto_original, traduccion))
+                    buffer_cache.append((texto_original, traduccion))
 
-                # Progreso sin tqdm
-                if not TQDM_AVAILABLE and idx % 100 == 0:
-                    self.logger.progress(idx, total_nuevas)
+                    if len(buffer_cache) >= self.guardar_cache_cada_n:
+                        self.db.guardar_lote_cache(config_idioma.codigo, buffer_cache)
+                        self.logger.info(f"Cache parcial guardado: {len(buffer_cache)} traducciones")
+                        buffer_cache = []
 
-        # Guardar traducciones restantes en cache
+                if idx % self.pausa_cada_n == 0:
+                    time.sleep(self.delay_pausa)
+
+            except Exception as e:
+                errores += 1
+                traducciones_pendientes.append((texto_original, str(e)))
+                self.logger.error(f"Error en unidad {unit.id}: {e}")
+
+            if not TQDM_AVAILABLE and idx % 100 == 0:
+                self.logger.progress(idx, total_nuevas)
+
         if buffer_cache:
             self.db.guardar_lote_cache(config_idioma.codigo, buffer_cache)
             self.logger.info(f"Cache final guardado: {len(buffer_cache)} traducciones")
 
-        # Registrar traducciones pendientes
+        return traducciones_pendientes, nuevas_traducciones
+
+    def _finalizar_traduccion(
+        self,
+        parser: XLIFFParser,
+        resultado_deteccion: ResultadoDeteccion,
+        config_idioma: ConfigIdioma,
+        archivo_entrada: str,
+        archivo_salida: str,
+        traducciones_pendientes: list,
+        nuevas_traducciones: list,
+        inicio: float,
+        fin: float
+    ) -> ResultadoTraduccion:
+        """Guarda archivo y registra sesion en BD."""
         if traducciones_pendientes:
             self.db.guardar_lote_pendientes(
                 config_idioma.codigo,
@@ -222,13 +268,12 @@ class TranslationService:
                 f"Registradas {len(traducciones_pendientes)} traducciones pendientes para reintentar"
             )
 
-        # Guardar archivo traducido
         self.logger.info(f"Guardando: {archivo_salida}")
         parser.guardar(archivo_salida)
 
-        duracion = time.time() - inicio
+        duracion = fin - inicio
+        errores = len(traducciones_pendientes)
 
-        # Registrar sesion en BD
         self.db.registrar_traduccion(
             idioma_origen="en",
             idioma_destino=config_idioma.codigo,
@@ -242,7 +287,7 @@ class TranslationService:
             estado="completado" if errores == 0 else "con_errores"
         )
 
-        resultado = ResultadoTraduccion(
+        return ResultadoTraduccion(
             archivo_origen=archivo_entrada,
             archivo_destino=archivo_salida,
             idioma_destino=config_idioma.nombre,
@@ -255,9 +300,6 @@ class TranslationService:
             duracion_segundos=duracion,
             exitoso=errores == 0
         )
-
-        self._mostrar_resumen(resultado)
-        return resultado
 
     def traducir_multiples_idiomas(
         self,
@@ -277,23 +319,34 @@ class TranslationService:
             Lista de ResultadoTraduccion
         """
         resultados = []
-
         for idioma in idiomas:
-            self.logger.info(f"\n{'='*50}")
-            self.logger.info(f"Procesando: {idioma}")
-            self.logger.info(f"{'='*50}")
-
-            try:
-                resultado = self.traducir(
-                    archivo_entrada,
-                    idioma,
-                    forzar_retraduccion=forzar_retraduccion
-                )
+            resultado = self._procesar_idioma_individual(
+                archivo_entrada, idioma, forzar_retraduccion
+            )
+            if resultado:
                 resultados.append(resultado)
-            except Exception as e:
-                self.logger.error(f"Error al traducir a {idioma}: {e}")
-
         return resultados
+
+    def _procesar_idioma_individual(
+        self,
+        archivo_entrada: str,
+        idioma: str,
+        forzar_retraduccion: bool
+    ) -> Optional[ResultadoTraduccion]:
+        """Procesa traduccion de un idioma individual."""
+        self.logger.info(f"\n{'='*50}")
+        self.logger.info(f"Procesando: {idioma}")
+        self.logger.info(f"{'='*50}")
+
+        try:
+            return self.traducir(
+                archivo_entrada,
+                idioma,
+                forzar_retraduccion=forzar_retraduccion
+            )
+        except Exception as e:
+            self.logger.error(f"Error al traducir a {idioma}: {e}")
+            return None
 
     def _mostrar_resumen(self, resultado: ResultadoTraduccion) -> None:
         """Muestra resumen de la traduccion."""

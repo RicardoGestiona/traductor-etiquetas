@@ -70,26 +70,31 @@ class BaseTranslator(ABC):
             return texto
 
         for intento in range(self.reintentos):
-            try:
-                resultado = self._traducir_interno(texto)
+            resultado = self._ejecutar_traduccion_con_reintentos(texto, intento)
+            if resultado is not None:
                 self._traducciones_realizadas += 1
                 return resultado
 
-            except Exception as e:
-                self._errores += 1
-                if intento < self.reintentos - 1:
-                    delay = self.delay_base * (2 ** intento)
-                    self.logger.warning(
-                        f"Error en intento {intento + 1}, reintentando en {delay}s..."
-                    )
-                    time.sleep(delay)
-                else:
-                    self.logger.error(
-                        f"Error al traducir despues de {self.reintentos} intentos: {texto[:50]}..."
-                    )
-                    return texto  # Devolver original si falla
-
         return texto
+
+    def _ejecutar_traduccion_con_reintentos(self, texto: str, intento: int) -> Optional[str]:
+        """Ejecuta traduccion con logica de reintentos."""
+        try:
+            return self._traducir_interno(texto)
+
+        except Exception as e:
+            self._errores += 1
+            if intento < self.reintentos - 1:
+                delay = self.delay_base * (2 ** intento)
+                self.logger.warning(
+                    f"Error en intento {intento + 1}, reintentando en {delay}s..."
+                )
+                time.sleep(delay)
+            else:
+                self.logger.error(
+                    f"Error al traducir despues de {self.reintentos} intentos: {texto[:50]}..."
+                )
+            return None
 
     @property
     def estadisticas(self) -> dict:

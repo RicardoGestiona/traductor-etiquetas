@@ -31,45 +31,15 @@ def cmd_traducir(args: argparse.Namespace) -> int:
     """Comando para traducir archivos XLIFF."""
     logger = get_logger()
 
-    # Validar archivo de entrada
-    if not os.path.exists(args.archivo):
-        logger.error(f"El archivo '{args.archivo}' no existe")
+    if not _validar_archivo_entrada(args.archivo):
         return 1
 
-    # Validar idiomas
-    idiomas_validos = []
-    for idioma in args.idioma:
-        config = obtener_config_idioma(idioma)
-        if config is None:
-            logger.error(f"Idioma no soportado: {idioma}")
-            logger.info(f"Idiomas disponibles: {', '.join(listar_idiomas())}")
-            return 1
-        idiomas_validos.append(idioma)
+    idiomas_validos = _validar_y_obtener_idiomas(args.idioma)
+    if not idiomas_validos:
+        return 1
 
     try:
-        service = TranslationService(
-            db_path=args.db,
-            base_dir_salida=args.output_dir
-        )
-
-        if len(idiomas_validos) == 1:
-            resultado = service.traducir(
-                args.archivo,
-                idiomas_validos[0],
-                archivo_salida=args.output,
-                forzar_retraduccion=args.forzar
-            )
-            return 0 if resultado.exitoso else 1
-        else:
-            resultados = service.traducir_multiples_idiomas(
-                args.archivo,
-                idiomas_validos,
-                forzar_retraduccion=args.forzar
-            )
-            exitosos = sum(1 for r in resultados if r.exitoso)
-            logger.info(f"\nResumen: {exitosos}/{len(resultados)} traducciones exitosas")
-            return 0 if exitosos == len(resultados) else 1
-
+        return _ejecutar_traduccion(args, idiomas_validos)
     except KeyboardInterrupt:
         logger.info("\nProceso interrumpido por el usuario")
         logger.info("El progreso se ha guardado en la base de datos.")
@@ -77,6 +47,57 @@ def cmd_traducir(args: argparse.Namespace) -> int:
     except Exception as e:
         logger.error(f"Error: {e}")
         return 1
+
+
+def _validar_archivo_entrada(archivo: str) -> bool:
+    """Valida que el archivo de entrada existe."""
+    logger = get_logger()
+    if not os.path.exists(archivo):
+        logger.error(f"El archivo '{archivo}' no existe")
+        return False
+    return True
+
+
+def _validar_y_obtener_idiomas(idiomas: list) -> list:
+    """Valida idiomas y retorna lista valida."""
+    logger = get_logger()
+    idiomas_validos = []
+
+    for idioma in idiomas:
+        if obtener_config_idioma(idioma) is None:
+            logger.error(f"Idioma no soportado: {idioma}")
+            logger.info(f"Idiomas disponibles: {', '.join(listar_idiomas())}")
+            return []
+        idiomas_validos.append(idioma)
+
+    return idiomas_validos
+
+
+def _ejecutar_traduccion(args: argparse.Namespace, idiomas_validos: list) -> int:
+    """Ejecuta traduccion de uno o multiples idiomas."""
+    logger = get_logger()
+    service = TranslationService(
+        db_path=args.db,
+        base_dir_salida=args.output_dir
+    )
+
+    if len(idiomas_validos) == 1:
+        resultado = service.traducir(
+            args.archivo,
+            idiomas_validos[0],
+            archivo_salida=args.output,
+            forzar_retraduccion=args.forzar
+        )
+        return 0 if resultado.exitoso else 1
+    else:
+        resultados = service.traducir_multiples_idiomas(
+            args.archivo,
+            idiomas_validos,
+            forzar_retraduccion=args.forzar
+        )
+        exitosos = sum(1 for r in resultados if r.exitoso)
+        logger.info(f"\nResumen: {exitosos}/{len(resultados)} traducciones exitosas")
+        return 0 if exitosos == len(resultados) else 1
 
 
 def cmd_procesar(args: argparse.Namespace) -> int:
@@ -137,23 +158,32 @@ def cmd_estadisticas(args: argparse.Namespace) -> int:
 
     logger.info("=== Estadisticas del Sistema de Traduccion ===\n")
 
-    # Cache por idioma
+    _mostrar_cache_estadisticas(db)
+    _mostrar_sesiones_estadisticas(db)
+    _mostrar_historial_estadisticas(db)
+
+    return 0
+
+
+def _mostrar_cache_estadisticas(db: DatabaseManager) -> None:
+    """Muestra estadisticas de cache."""
+    logger = get_logger()
     cache = db.obtener_conteo_cache()
+
     if cache:
         logger.info("Cache de traducciones:")
         for idioma, total in cache.items():
-            config = None
-            for nombre, cfg in IDIOMAS_SOPORTADOS.items():
-                if cfg.codigo == idioma:
-                    config = cfg
-                    break
-            nombre_idioma = config.nombre if config else idioma
+            nombre_idioma = _obtener_nombre_idioma(idioma)
             logger.info(f"  - {nombre_idioma} ({idioma}): {total} traducciones")
     else:
         logger.info("Cache de traducciones: vacio")
 
-    # Estadisticas por idioma
+
+def _mostrar_sesiones_estadisticas(db: DatabaseManager) -> None:
+    """Muestra estadisticas de sesiones."""
+    logger = get_logger()
     logger.info("\nSesiones de traduccion:")
+
     stats = db.obtener_estadisticas_globales()
     if stats:
         for stat in stats:
@@ -162,8 +192,12 @@ def cmd_estadisticas(args: argparse.Namespace) -> int:
     else:
         logger.info("  No hay sesiones registradas")
 
-    # Historial reciente
+
+def _mostrar_historial_estadisticas(db: DatabaseManager) -> None:
+    """Muestra historial reciente."""
+    logger = get_logger()
     logger.info("\nHistorial reciente:")
+
     historial = db.obtener_historial(5)
     if historial:
         for h in historial:
@@ -173,7 +207,13 @@ def cmd_estadisticas(args: argparse.Namespace) -> int:
     else:
         logger.info("  Sin historial")
 
-    return 0
+
+def _obtener_nombre_idioma(codigo: str) -> str:
+    """Obtiene nombre de idioma desde codigo."""
+    for nombre, cfg in IDIOMAS_SOPORTADOS.items():
+        if cfg.codigo == codigo:
+            return cfg.nombre
+    return codigo
 
 
 def cmd_listar(args: argparse.Namespace) -> int:
@@ -204,7 +244,6 @@ def cmd_pendientes(args: argparse.Namespace) -> int:
     logger = get_logger()
     db = DatabaseManager(args.db)
 
-    # Obtener conteo por idioma
     conteo = db.contar_pendientes()
 
     if not conteo:
@@ -213,43 +252,47 @@ def cmd_pendientes(args: argparse.Namespace) -> int:
 
     logger.info("=== Traducciones Pendientes ===\n")
 
+    _mostrar_conteo_pendientes(conteo)
+
+    if args.detalle:
+        _mostrar_detalle_pendientes(db, args)
+
+    return 0
+
+
+def _mostrar_conteo_pendientes(conteo: dict) -> None:
+    """Muestra conteo de pendientes por idioma."""
+    logger = get_logger()
     total_general = 0
+
     for idioma, total in conteo.items():
-        config = None
-        for nombre, cfg in IDIOMAS_SOPORTADOS.items():
-            if cfg.codigo == idioma:
-                config = cfg
-                break
-        nombre_idioma = config.nombre if config else idioma
+        nombre_idioma = _obtener_nombre_idioma(idioma)
         logger.info(f"  {nombre_idioma} ({idioma}): {total} pendientes")
         total_general += total
 
     logger.info(f"\nTotal: {total_general} traducciones pendientes")
 
-    # Mostrar detalle si se solicita
-    if args.detalle:
-        idioma_filtro = args.idioma if args.idioma else None
-        pendientes = db.obtener_pendientes(idioma_filtro)
 
-        if pendientes:
-            logger.info("\nDetalle de pendientes:")
-            for p in pendientes[:args.limite]:
-                texto_corto = p['texto_origen'][:60] + "..." if len(p['texto_origen']) > 60 else p['texto_origen']
-                logger.info(f"  [{p['idioma_destino']}] {texto_corto}")
-                logger.info(f"       Motivo: {p['motivo_fallo']}")
-                logger.info(f"       Reintentos: {p['reintentos']}")
+def _mostrar_detalle_pendientes(db: DatabaseManager, args: argparse.Namespace) -> None:
+    """Muestra detalle de pendientes con limite."""
+    logger = get_logger()
+    idioma_filtro = args.idioma if args.idioma else None
+    pendientes = db.obtener_pendientes(idioma_filtro)
 
-    return 0
+    if pendientes:
+        logger.info("\nDetalle de pendientes:")
+        for p in pendientes[:args.limite]:
+            texto_corto = p['texto_origen'][:60] + "..." if len(p['texto_origen']) > 60 else p['texto_origen']
+            logger.info(f"  [{p['idioma_destino']}] {texto_corto}")
+            logger.info(f"       Motivo: {p['motivo_fallo']}")
+            logger.info(f"       Reintentos: {p['reintentos']}")
 
 
 def cmd_reintentar(args: argparse.Namespace) -> int:
     """Comando para reintentar traducciones pendientes."""
-    from traductor.core.base_translator import crear_traductor
-
     logger = get_logger()
     db = DatabaseManager(args.db)
 
-    # Obtener pendientes
     idioma_filtro = args.idioma if args.idioma else None
     pendientes = db.obtener_pendientes(idioma_filtro)
 
@@ -259,25 +302,34 @@ def cmd_reintentar(args: argparse.Namespace) -> int:
 
     logger.info(f"Reintentando {len(pendientes)} traducciones pendientes...\n")
 
-    # Agrupar por idioma
+    por_idioma = _agrupar_pendientes_por_idioma(pendientes)
+    total_exito, total_fallo = _procesar_pendientes_por_idioma(por_idioma, db)
+
+    logger.info(f"\nResultado: {total_exito} exitosas, {total_fallo} fallidas")
+    return 0 if total_fallo == 0 else 1
+
+
+def _agrupar_pendientes_por_idioma(pendientes: list) -> dict:
+    """Agrupa pendientes por idioma."""
     por_idioma = {}
     for p in pendientes:
         idioma = p['idioma_destino']
         if idioma not in por_idioma:
             por_idioma[idioma] = []
         por_idioma[idioma].append(p)
+    return por_idioma
 
+
+def _procesar_pendientes_por_idioma(por_idioma: dict, db: DatabaseManager) -> tuple:
+    """Procesa pendientes de cada idioma."""
+    from traductor.core.base_translator import crear_traductor
+
+    logger = get_logger()
     total_exito = 0
     total_fallo = 0
 
     for idioma, lista_pendientes in por_idioma.items():
-        config = obtener_config_idioma(idioma)
-        if not config:
-            # Buscar por codigo
-            for nombre, cfg in IDIOMAS_SOPORTADOS.items():
-                if cfg.codigo == idioma:
-                    config = cfg
-                    break
+        config = _obtener_config_por_codigo(idioma)
 
         if not config:
             logger.error(f"No se encontro configuracion para idioma: {idioma}")
@@ -288,27 +340,52 @@ def cmd_reintentar(args: argparse.Namespace) -> int:
         traductor = crear_traductor(tipo="google", config_destino=config)
 
         for p in lista_pendientes:
-            texto_origen = p['texto_origen']
-            try:
-                traduccion = traductor.traducir(texto_origen)
+            exito, fallo = _reintentar_traduccion_unica(
+                p, idioma, traductor, db
+            )
+            total_exito += exito
+            total_fallo += fallo
 
-                if traduccion and traduccion.strip() and traduccion != texto_origen:
-                    # Exito: guardar en cache y eliminar de pendientes
-                    db.guardar_en_cache(idioma, texto_origen, traduccion)
-                    db.eliminar_pendiente(idioma, texto_origen)
-                    total_exito += 1
-                    logger.info(f"  OK: {texto_origen[:40]}...")
-                else:
-                    total_fallo += 1
-                    logger.warning(f"  FALLO: {texto_origen[:40]}...")
+    return total_exito, total_fallo
 
-            except Exception as e:
-                total_fallo += 1
-                logger.error(f"  ERROR: {texto_origen[:40]}... - {e}")
 
-    logger.info(f"\nResultado: {total_exito} exitosas, {total_fallo} fallidas")
+def _obtener_config_por_codigo(codigo_o_nombre: str) -> Optional:
+    """Obtiene config de idioma por codigo o nombre."""
+    config = obtener_config_idioma(codigo_o_nombre)
+    if config:
+        return config
 
-    return 0 if total_fallo == 0 else 1
+    for nombre, cfg in IDIOMAS_SOPORTADOS.items():
+        if cfg.codigo == codigo_o_nombre:
+            return cfg
+    return None
+
+
+def _reintentar_traduccion_unica(
+    pendiente: dict,
+    idioma: str,
+    traductor,
+    db: DatabaseManager
+) -> tuple:
+    """Reintenta traduccion unica. Retorna (exito, fallo)."""
+    logger = get_logger()
+    texto_origen = pendiente['texto_origen']
+
+    try:
+        traduccion = traductor.traducir(texto_origen)
+
+        if traduccion and traduccion.strip() and traduccion != texto_origen:
+            db.guardar_en_cache(idioma, texto_origen, traduccion)
+            db.eliminar_pendiente(idioma, texto_origen)
+            logger.info(f"  OK: {texto_origen[:40]}...")
+            return 1, 0
+        else:
+            logger.warning(f"  FALLO: {texto_origen[:40]}...")
+            return 0, 1
+
+    except Exception as e:
+        logger.error(f"  ERROR: {texto_origen[:40]}... - {e}")
+        return 0, 1
 
 
 def cmd_limpiar_pendientes(args: argparse.Namespace) -> int:
@@ -363,164 +440,132 @@ Ejemplos:
 
     subparsers = parser.add_subparsers(dest="comando", help="Comando a ejecutar")
 
-    # Comando: procesar
-    p_procesar = subparsers.add_parser(
+    _configurar_parser_procesar(subparsers)
+    _configurar_parser_traducir(subparsers)
+    _configurar_parser_migrar(subparsers)
+    _configurar_parser_estadisticas(subparsers)
+    _configurar_parser_listar(subparsers)
+    _configurar_parser_pendientes(subparsers)
+    _configurar_parser_reintentar(subparsers)
+    _configurar_parser_limpiar(subparsers)
+
+    return parser
+
+
+def _configurar_parser_procesar(subparsers) -> None:
+    """Configura subparser para comando 'procesar'."""
+    p = subparsers.add_parser(
         "procesar",
         help="Procesa archivos en traduccion-pendiente/",
         description="Traduce automaticamente archivos XLIFF a catalan, gallego y euskera"
     )
-    p_procesar.add_argument(
-        "--watch", "-w",
-        action="store_true",
-        help="Modo vigilancia: monitorea carpeta continuamente"
-    )
-    p_procesar.add_argument(
-        "--intervalo",
-        type=int,
-        default=10,
-        help="Segundos entre verificaciones en modo watch (default: 10)"
-    )
-    p_procesar.add_argument(
-        "--entrada",
-        default="traduccion-pendiente",
-        help="Carpeta de entrada (default: traduccion-pendiente)"
-    )
-    p_procesar.add_argument(
-        "--salida",
-        default="traducidos",
-        help="Carpeta de salida (default: traducidos)"
-    )
-    p_procesar.add_argument(
-        "--no-mover",
-        action="store_true",
-        help="No mover archivos procesados a _procesados/"
-    )
-    p_procesar.set_defaults(func=cmd_procesar)
+    p.add_argument("--watch", "-w", action="store_true",
+                   help="Modo vigilancia: monitorea carpeta continuamente")
+    p.add_argument("--intervalo", type=int, default=10,
+                   help="Segundos entre verificaciones en modo watch (default: 10)")
+    p.add_argument("--entrada", default="traduccion-pendiente",
+                   help="Carpeta de entrada (default: traduccion-pendiente)")
+    p.add_argument("--salida", default="traducidos",
+                   help="Carpeta de salida (default: traducidos)")
+    p.add_argument("--no-mover", action="store_true",
+                   help="No mover archivos procesados a _procesados/")
+    p.set_defaults(func=cmd_procesar)
 
-    # Comando: traducir
-    p_traducir = subparsers.add_parser(
+
+def _configurar_parser_traducir(subparsers) -> None:
+    """Configura subparser para comando 'traducir'."""
+    p = subparsers.add_parser(
         "traducir",
         help="Traduce un archivo XLIFF",
         description="Traduce un archivo XLIFF a uno o mas idiomas destino"
     )
-    p_traducir.add_argument(
-        "archivo",
-        help="Archivo XLIFF a traducir"
-    )
-    p_traducir.add_argument(
-        "--idioma", "-i",
-        nargs="+",
-        required=True,
-        help="Idioma(s) destino (ej: catalan euskera gallego)"
-    )
-    p_traducir.add_argument(
-        "--output", "-o",
-        help="Archivo de salida (solo para un idioma)"
-    )
-    p_traducir.add_argument(
-        "--output-dir",
-        default="Idiomas",
-        help="Directorio base para archivos traducidos (default: Idiomas)"
-    )
-    p_traducir.add_argument(
-        "--forzar", "-f",
-        action="store_true",
-        help="Forzar retraduccion (ignorar cache)"
-    )
-    p_traducir.set_defaults(func=cmd_traducir)
+    p.add_argument("archivo", help="Archivo XLIFF a traducir")
+    p.add_argument("--idioma", "-i", nargs="+", required=True,
+                   help="Idioma(s) destino (ej: catalan euskera gallego)")
+    p.add_argument("--output", "-o", help="Archivo de salida (solo para un idioma)")
+    p.add_argument("--output-dir", default="Idiomas",
+                   help="Directorio base para archivos traducidos (default: Idiomas)")
+    p.add_argument("--forzar", "-f", action="store_true",
+                   help="Forzar retraduccion (ignorar cache)")
+    p.set_defaults(func=cmd_traducir)
 
-    # Comando: migrar-checkpoints
-    p_migrar = subparsers.add_parser(
+
+def _configurar_parser_migrar(subparsers) -> None:
+    """Configura subparser para comando 'migrar-checkpoints'."""
+    p = subparsers.add_parser(
         "migrar-checkpoints",
         help="Migra checkpoints JSON legacy a SQLite",
         description="Busca archivos checkpoint_*.json y migra su contenido a la base de datos"
     )
-    p_migrar.add_argument(
-        "--directorio", "-d",
-        default=".",
-        help="Directorio donde buscar checkpoints (default: .)"
-    )
-    p_migrar.add_argument(
-        "--no-archivar",
-        action="store_true",
-        help="No mover checkpoints migrados a legacy/"
-    )
-    p_migrar.set_defaults(func=cmd_migrar_checkpoints)
+    p.add_argument("--directorio", "-d", default=".",
+                   help="Directorio donde buscar checkpoints (default: .)")
+    p.add_argument("--no-archivar", action="store_true",
+                   help="No mover checkpoints migrados a legacy/")
+    p.set_defaults(func=cmd_migrar_checkpoints)
 
-    # Comando: estadisticas
-    p_stats = subparsers.add_parser(
+
+def _configurar_parser_estadisticas(subparsers) -> None:
+    """Configura subparser para comando 'estadisticas'."""
+    p = subparsers.add_parser(
         "estadisticas",
         help="Muestra estadisticas del sistema",
         description="Muestra estadisticas de cache, sesiones y traducciones"
     )
-    p_stats.set_defaults(func=cmd_estadisticas)
+    p.set_defaults(func=cmd_estadisticas)
 
-    # Comando: listar
-    p_listar = subparsers.add_parser(
+
+def _configurar_parser_listar(subparsers) -> None:
+    """Configura subparser para comando 'listar'."""
+    p = subparsers.add_parser(
         "listar",
         help="Lista idiomas o traducciones",
         description="Lista idiomas soportados o traducciones existentes"
     )
-    p_listar.add_argument(
-        "tipo",
-        choices=["idiomas", "traducciones"],
-        help="Que listar: idiomas soportados o traducciones existentes"
-    )
-    p_listar.add_argument(
-        "--output-dir",
-        default="Idiomas",
-        help="Directorio de traducciones (default: Idiomas)"
-    )
-    p_listar.set_defaults(func=cmd_listar)
+    p.add_argument("tipo", choices=["idiomas", "traducciones"],
+                   help="Que listar: idiomas soportados o traducciones existentes")
+    p.add_argument("--output-dir", default="Idiomas",
+                   help="Directorio de traducciones (default: Idiomas)")
+    p.set_defaults(func=cmd_listar)
 
-    # Comando: pendientes
-    p_pendientes = subparsers.add_parser(
+
+def _configurar_parser_pendientes(subparsers) -> None:
+    """Configura subparser para comando 'pendientes'."""
+    p = subparsers.add_parser(
         "pendientes",
         help="Lista traducciones pendientes (fallidas)",
         description="Muestra traducciones que fallaron y estan pendientes de reintentar"
     )
-    p_pendientes.add_argument(
-        "--idioma", "-i",
-        help="Filtrar por codigo de idioma (ej: ca, eu, gl)"
-    )
-    p_pendientes.add_argument(
-        "--detalle", "-d",
-        action="store_true",
-        help="Mostrar detalle de cada traduccion pendiente"
-    )
-    p_pendientes.add_argument(
-        "--limite", "-l",
-        type=int,
-        default=20,
-        help="Limite de registros a mostrar en detalle (default: 20)"
-    )
-    p_pendientes.set_defaults(func=cmd_pendientes)
+    p.add_argument("--idioma", "-i",
+                   help="Filtrar por codigo de idioma (ej: ca, eu, gl)")
+    p.add_argument("--detalle", "-d", action="store_true",
+                   help="Mostrar detalle de cada traduccion pendiente")
+    p.add_argument("--limite", "-l", type=int, default=20,
+                   help="Limite de registros a mostrar en detalle (default: 20)")
+    p.set_defaults(func=cmd_pendientes)
 
-    # Comando: reintentar
-    p_reintentar = subparsers.add_parser(
+
+def _configurar_parser_reintentar(subparsers) -> None:
+    """Configura subparser para comando 'reintentar'."""
+    p = subparsers.add_parser(
         "reintentar",
         help="Reintenta traducciones pendientes",
         description="Reintenta traducir las etiquetas que fallaron anteriormente"
     )
-    p_reintentar.add_argument(
-        "--idioma", "-i",
-        help="Filtrar por codigo de idioma (ej: ca, eu, gl)"
-    )
-    p_reintentar.set_defaults(func=cmd_reintentar)
+    p.add_argument("--idioma", "-i",
+                   help="Filtrar por codigo de idioma (ej: ca, eu, gl)")
+    p.set_defaults(func=cmd_reintentar)
 
-    # Comando: limpiar-pendientes
-    p_limpiar = subparsers.add_parser(
+
+def _configurar_parser_limpiar(subparsers) -> None:
+    """Configura subparser para comando 'limpiar-pendientes'."""
+    p = subparsers.add_parser(
         "limpiar-pendientes",
         help="Elimina traducciones pendientes",
         description="Elimina traducciones pendientes de la base de datos"
     )
-    p_limpiar.add_argument(
-        "--idioma", "-i",
-        help="Filtrar por codigo de idioma (ej: ca, eu, gl)"
-    )
-    p_limpiar.set_defaults(func=cmd_limpiar_pendientes)
-
-    return parser
+    p.add_argument("--idioma", "-i",
+                   help="Filtrar por codigo de idioma (ej: ca, eu, gl)")
+    p.set_defaults(func=cmd_limpiar_pendientes)
 
 
 def main(argv: Optional[List[str]] = None) -> int:
