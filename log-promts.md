@@ -216,3 +216,17 @@ El proyecto es 100% Python. No contiene codigo C#/.NET ni React.
 **Total de archivos modificados:** 8
 **Total de funciones extraidas:** 30
 **Reduccion promedio:** 60% lineas en funciones criticas
+
+**Commits realizados:**
+1. 88a126b - Refactorizar funciones > 20 lineas segun politica SOLID/DRY
+2. 7900a2e - Fix: retornar archivo_salida generado en _preparar_documento()
+
+**Verificaciones Post-Refactorización:**
+- ✅ `python -m traductor --version` → OK (v2.0.0)
+- ✅ `python -m traductor listar idiomas` → OK (9 idiomas listados)
+- ✅ `python -m traductor estadisticas` → OK (27K cache, historial mostrado)
+- ✅ `python -m traductor pendientes` → OK (funciona con BD vacia)
+- ✅ `python -m traductor traducir [file] --idioma catalan` → OK (archivo generado)
+- ✅ Help completo funcionando correctamente
+
+**Conclusion:** Refactorizacion completada exitosamente. Sistema completamente funcional.
