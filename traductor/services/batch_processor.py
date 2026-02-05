@@ -16,6 +16,7 @@ from dataclasses import dataclass
 
 from traductor.services.translation_service import TranslationService
 from traductor.utils.logger import get_logger
+from traductor.utils.report_generator import ReportGenerator
 
 
 @dataclass
@@ -165,7 +166,26 @@ class BatchProcessor:
 
         # Resumen final
         self._mostrar_resumen(resultados)
+
+        # Generar informe si hay errores
+        self._generar_informe_si_errores(resultados)
+
         return resultados
+
+    def _generar_informe_si_errores(
+        self,
+        resultados: List[ResultadoProcesamiento]
+    ) -> None:
+        """Genera informe Markdown si hay errores en la sesion."""
+        tiene_errores = any(not r.exitoso for r in resultados)
+
+        if tiene_errores:
+            try:
+                report = ReportGenerator(db_path=self.db_path)
+                ruta_informe = report.generar_informe_errores()
+                self.logger.info(f"Informe de errores generado: {ruta_informe}")
+            except Exception as e:
+                self.logger.error(f"No se pudo generar informe: {e}")
 
     def _mostrar_resumen(self, resultados: List[ResultadoProcesamiento]) -> None:
         """Muestra resumen del procesamiento."""

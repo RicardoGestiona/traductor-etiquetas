@@ -4,5 +4,6 @@
 
 from traductor.utils.file_naming import FileNaming
 from traductor.utils.logger import Logger, get_logger
+from traductor.utils.report_generator import ReportGenerator
 
-__all__ = ["FileNaming", "Logger", "get_logger"]
+__all__ = ["FileNaming", "Logger", "get_logger", "ReportGenerator"]

@@ -92,6 +92,10 @@ class IncrementalDetector:
         etiquetas_en_cache = []
 
         for unit in parser.iterar_unidades():
+            # Ignorar etiquetas con texto vacío o solo espacios
+            if not unit.target or not unit.target.strip():
+                continue
+
             hash_texto = self.db.calcular_hash(unit.target)
 
             if hash_texto in cache:

@@ -420,3 +420,53 @@ El proyecto `traductor-etiquetas-docebo` cumple **100% de los estándares global
 ---
 
 *Auditoría realizada por Claude Code (Lead Fullstack Orchestrator) - 2026-01-30 14:00*
+
+### [2026-02-02 00:00] | PROMPT: Revisar archivo warning-xliff-english-ca.xliff - hay términos sin traducir | DIAGNÓSTICO EN PROGRESO
+
+---
+
+### [2026-02-05 09:15] | PROMPT: Traducción con errores en tres idiomas | RESULTADO: CORREGIDO
+
+**Solicitud:** Corregir errores de traducción y generar informe de errores en formato .md
+
+**Diagnóstico:**
+- 1 etiqueta por idioma marcada como "error" por texto vacío
+- Falso positivo: el XLIFF contenía etiquetas sin contenido
+- Las ~27,478 traducciones por idioma se realizaron correctamente
+
+**Cambios realizados:**
+
+1. **`traductor/services/incremental_detector.py`** (línea 94-96)
+   - Añadido filtro para ignorar etiquetas con texto vacío o solo espacios
+   - Evita que etiquetas vacías lleguen al proceso de traducción
+
+2. **`traductor/services/translation_service.py`** (línea 213-216)
+   - Añadida validación defensiva adicional
+   - Si un texto vacío llegara al traductor, se ignora con log debug
+   - Mejorado mensaje de error: "API devolvio respuesta vacia"
+
+3. **`traductor/utils/report_generator.py`** (NUEVO)
+   - Clase `ReportGenerator` para informes en Markdown
+   - `generar_informe_errores()`: Informe detallado de errores pendientes
+   - `generar_informe_sesion()`: Informe de sesión de traducción
+   - Incluye:
+     - Resumen por tipo de error
+     - Resumen por idioma
+     - Detalle de cada error (máx 50)
+     - Guía de solución con comandos útiles
+
+4. **`traductor/services/batch_processor.py`** (línea 167-180)
+   - Genera informe automático cuando hay errores
+   - Guardado en carpeta `informes/`
+
+5. **`traductor/utils/__init__.py`**
+   - Exportado `ReportGenerator`
+
+**Archivos generados:**
+- `informes/informe_errores_YYYYMMDD_HHMMSS.md` (automático si hay errores)
+
+**Verificación:**
+- ✅ Pendientes limpiados: 3 eliminados (falsos positivos)
+- ✅ Sistema funcional
+
+---

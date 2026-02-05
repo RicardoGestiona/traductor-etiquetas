@@ -209,15 +209,20 @@ class TranslationService:
         for idx, unit in enumerate(iterador, 1):
             texto_original = unit.target
 
+            # Validación defensiva: ignorar textos vacíos
+            if not texto_original or not texto_original.strip():
+                self.logger.debug(f"Ignorando etiqueta vacía: {unit.id}")
+                continue
+
             try:
                 traduccion = self._traductor.traducir(texto_original)
 
                 if traduccion is None or traduccion.strip() == "":
                     traducciones_pendientes.append(
-                        (texto_original, "Traduccion devolvio None o vacio")
+                        (texto_original, "API devolvio respuesta vacia")
                     )
                     errores += 1
-                    self.logger.warning(f"Traduccion None para: {texto_original[:50]}...")
+                    self.logger.warning(f"API vacia para: {texto_original[:50]}...")
                 else:
                     parser.actualizar_traduccion(unit, traduccion)
                     nuevas_traducciones.append((texto_original, traduccion))
