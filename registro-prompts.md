@@ -162,3 +162,5 @@ VACUUM;
 - .gitkeep en carpetas de estructura
 - CLAUDE.md actualizado con nueva documentacion
 
+
+### [2026-02-13 12:56] | PROMPT: Reemplazar traducciones de "Whoops, there is nothing here" y "Looks like there's nothing for you to do in this area right now" por espacio en blanco | RESULTADO: Actualizada BD (12 registros en cache_traducciones para ca/eu/gl) y archivos XLIFF en traducidos/ y legacy/. Las cadenas vacías usan un espacio " " para pasar validación de Docebo. Textos originales en inglés afectados: "Whoops, there is nothing here", "Whoops, there's nothing here", "Looks like there's nothing for you to do in this area right now" (con y sin punto).
