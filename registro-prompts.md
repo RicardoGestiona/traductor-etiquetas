@@ -164,3 +164,57 @@ VACUUM;
 
 
 ### [2026-02-13 12:56] | PROMPT: Reemplazar traducciones de "Whoops, there is nothing here" y "Looks like there's nothing for you to do in this area right now" por espacio en blanco | RESULTADO: Actualizada BD (12 registros en cache_traducciones para ca/eu/gl) y archivos XLIFF en traducidos/ y legacy/. Las cadenas vacías usan un espacio " " para pasar validación de Docebo. Textos originales en inglés afectados: "Whoops, there is nothing here", "Whoops, there's nothing here", "Looks like there's nothing for you to do in this area right now" (con y sin punto).
+
+### [2026-02-17 ~] | PROMPT: Limpieza integral del proyecto (12 issues HIGH+MEDIUM del análisis sc:analyze) | RESULTADO: Implementadas 5 fases:
+- **Fase 1.1:** `base_translator.py` — `traducir()` retorna `None` en vez de texto original al fallar; backoff cap 30s
+- **Fase 1.2:** `xliff_parser.py` — Reemplazo posicional exacto (pos_inicio/pos_fin en TransUnit) en vez de str.replace, con recálculo de offsets posteriores
+- **Fase 2:** `translation_service.py` — `_traducir_nuevas` dividido en 4 métodos (<20 líneas c/u); dataclass `ContextoFinalizacion`; validación traducción == texto_original
+- **Fase 3:** `logger.py` — `JsonFormatter` para file handler (JSON estructurado); consola mantiene texto plano
+- **Fase 4:** Path traversal — `_validar_ruta_segura()` en `file_naming.py`; validación `Path.cwd()` en `cli.py`
+- **Fase 5:** DRY — `obtener_config_por_codigo()` y `obtener_nombre_por_codigo()` centralizados en `config/idiomas.py`; eliminados duplicados en `cli.py`; método público `obtener_errores_pendientes_detallado()` en `db_manager.py`; `requirements.txt` limpio con upper bounds
+- **Archivos modificados (10):** base_translator.py, xliff_parser.py, translation_service.py, logger.py, file_naming.py, cli.py, idiomas.py, db_manager.py, report_generator.py, requirements.txt
+
+### 2026-02-17
+
+**#014** - Cleanup
+> /sc:cleanup — Limpieza de código Python
+
+*Resultado:* Cleanup de código Python ejecutado:
+- **Imports muertos eliminados:** `import os` en file_naming.py, batch_processor.py, migrations.py; `import hashlib` en incremental_detector.py; `Callable` en translation_service.py
+- **Dead code eliminado:** `_progreso_callback` (atributo nunca asignado ni invocado) en translation_service.py; `comparar_archivos()` + `_cargar_y_extraer_ids()` + `_detectar_diferencias()` (métodos sin invocación) en incremental_detector.py; `exportar_cache_json()` (método sin invocación) en db_manager.py; tipo `Set` en imports de incremental_detector.py
+- **Directorio eliminado:** `Review/` (fuera de arquitectura, contenía xliff-amharic y CSV sin uso)
+- **Archivos modificados (5):** file_naming.py, batch_processor.py, migrations.py, incremental_detector.py, translation_service.py, db_manager.py
+
+**#015** - Consolidar READMEs
+> Tengo readme.md, CLAUDE.md, CLAUDE.local.md, README_GITHUB.md — ¿qué diferencia hay? → Opción 2: mover legacy y crear nuevo
+
+*Resultado:* Consolidacion de documentacion:
+- **Movidos a `legacy/`:** `readme.md` (documentaba sistema v1) y `README_GITHUB.md` (referencias a scripts inexistentes)
+- **Creado `README.md`:** Nuevo README actualizado con arquitectura actual, comandos CLI, idiomas soportados y workflow
+- **Sin cambios:** `CLAUDE.md` y `CLAUDE.local.md` (activos, cumplen su funcion)
+
+**#016** - Revision redaccion CLAUDE.md
+> Revisa la redaccion de las secciones nuevas "Estructura del fichero" y "Reglas de procesamiento" en CLAUDE.md
+
+*Resultado:* Redaccion corregida en ambas secciones:
+- **Estructura del fichero:** XML en code blocks (sin comillas sueltas), eliminada etiqueta redundante, corregida explicacion de trans-unit id (el cache usa hash, no el id), aclarado que target=source en el archivo de entrada
+- **Reglas de procesamiento:** Corregido typo (parentesis extra), reescrita regla 2 para usar codigos ISO (ca/gl/eu) con nota sobre slots Docebo (am/bs/ar), precisada regla 5 (mantener vacia, no traducir)
+- **Pendiente de implementar:** Actualizacion de `target-language` en cabecera al generar archivo traducido (el sistema actualmente deja "en")
+
+### 2026-03-10
+
+**#018** - Correccion manual de traducciones en cache (acepciones incorrectas)
+> Actualizar en BD las traducciones de "Play" y "Resume" para euskera, catalan y gallego. Google Translate usa acepciones incorrectas en contexto LMS.
+
+*Resultado:* Actualizacion directa en `cache_traducciones` (traductor.db):
+- **Play:** "Jugar/Xogar/Jolastu" → "Començar/Comezar/Hasi" (acepcion: comenzar)
+- **Resume:** "Currículum/Currículo/Curriculuma" → "Reprendre/Retomar/Berrekin" (acepcion: reanudar)
+
+**#017** - Copia automatica del original en ingles
+> Implementar archivado automatico del fichero original en ingles en `xliffs-english-archivo/` con nombre `YYYYMMDD-xliff-english.xliff` al procesar traducciones
+
+*Resultado:* Implementacion completa:
+- **batch_processor.py:** Nuevo metodo `_archivar_original()` con sufijo incremental si ya existe archivo del mismo dia; inicializacion de `carpeta_archivo` en `__init__`; invocacion antes de `_traducir_a_todos_idiomas()`
+- **CLAUDE.md:** Nueva regla 7 en "Reglas de procesamiento" + carpeta `xliffs-english-archivo/` en seccion Architecture
+- **tests/test_xliff_output.py:** Nueva clase `TestArchivoOriginalEnIngles` con 5 tests (copia generada, patron de nombre, contenido identico, sufijo -2, sufijo -3)
+- **25/25 tests passed**
