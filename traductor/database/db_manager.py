@@ -240,22 +240,43 @@ class DatabaseManager:
                 cursor = conn.execute("DELETE FROM cache_traducciones")
             return cursor.rowcount
 
-    def exportar_cache_json(self, idioma_destino: str) -> Dict[str, str]:
+    def purgar_cache_variables_traducidas(self) -> Dict[str, int]:
         """
-        Exporta cache a formato compatible con checkpoints legacy.
-
-        Args:
-            idioma_destino: Codigo del idioma
+        Elimina entradas de cache donde las variables {placeholder}
+        fueron traducidas incorrectamente.
 
         Returns:
-            Diccionario {texto_origen: texto_traducido}
+            Diccionario {idioma: registros_eliminados}
         """
+        import re
+        placeholder_pattern = re.compile(r'\{[^}]+\}')
+        eliminados_por_idioma: Dict[str, int] = {}
+
         with self._conexion() as conn:
             cursor = conn.execute(
-                "SELECT texto_origen, texto_traducido FROM cache_traducciones WHERE idioma_destino = ?",
-                (idioma_destino,)
+                "SELECT idioma_destino, hash_origen, texto_origen, texto_traducido "
+                "FROM cache_traducciones"
             )
-            return {row["texto_origen"]: row["texto_traducido"] for row in cursor}
+            claves_eliminar = []
+
+            for row in cursor:
+                vars_origen = set(placeholder_pattern.findall(row["texto_origen"]))
+                if not vars_origen:
+                    continue
+                vars_traducido = set(placeholder_pattern.findall(row["texto_traducido"]))
+                if vars_origen != vars_traducido:
+                    claves_eliminar.append((row["idioma_destino"], row["hash_origen"]))
+                    idioma = row["idioma_destino"]
+                    eliminados_por_idioma[idioma] = eliminados_por_idioma.get(idioma, 0) + 1
+
+            for idioma, hash_origen in claves_eliminar:
+                conn.execute(
+                    "DELETE FROM cache_traducciones "
+                    "WHERE idioma_destino = ? AND hash_origen = ?",
+                    (idioma, hash_origen)
+                )
+
+        return eliminados_por_idioma
 
     # ==================== TRADUCCIONES PENDIENTES ====================
 
@@ -358,6 +379,23 @@ class DatabaseManager:
         with self._conexion() as conn:
             cursor = conn.execute(QUERIES["contar_pendientes_por_idioma"])
             return {row["idioma_destino"]: row["total"] for row in cursor}
+
+    def obtener_errores_pendientes_detallado(self) -> List[Dict[str, Any]]:
+        """
+        Obtiene errores pendientes con todos los campos para informes.
+
+        Returns:
+            Lista de dicts con idioma_destino, texto_origen, motivo_fallo,
+            archivo_origen, fecha_fallo, reintentos
+        """
+        with self._conexion() as conn:
+            cursor = conn.execute("""
+                SELECT idioma_destino, texto_origen, motivo_fallo,
+                       archivo_origen, fecha_fallo, reintentos
+                FROM traducciones_pendientes
+                ORDER BY fecha_fallo DESC
+            """)
+            return [dict(row) for row in cursor]
 
     def limpiar_pendientes(self, idioma_destino: Optional[str] = None) -> int:
         """

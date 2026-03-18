@@ -7,7 +7,6 @@ Formato: YYYYMMDD-nombre-idioma.xliff
 Ejemplo: 20260123-xliff-english-ca.xliff
 """
 
-import os
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -26,6 +25,23 @@ class FileNaming:
             base_dir: Directorio base para archivos traducidos
         """
         self.base_dir = Path(base_dir)
+        self._project_root = Path.cwd().resolve()
+
+    def _validar_ruta_segura(self, ruta: Path) -> None:
+        """
+        Verifica que la ruta resuelta esta dentro del project root.
+
+        Args:
+            ruta: Ruta a validar
+
+        Raises:
+            ValueError: Si la ruta escapa del project root
+        """
+        ruta_resuelta = ruta.resolve()
+        if not str(ruta_resuelta).startswith(str(self._project_root)):
+            raise ValueError(
+                f"Path traversal detectado: {ruta} resuelve fuera del proyecto"
+            )
 
     def generar_nombre_salida(
         self,
@@ -47,15 +63,17 @@ class FileNaming:
         if fecha is None:
             fecha = datetime.now()
 
-        # Extraer nombre base sin extension
-        nombre_base = Path(archivo_origen).stem
+        # Extraer nombre base sin extension (o usar override si esta definido)
+        nombre_base = config_idioma.nombre_base_override or Path(archivo_origen).stem
 
-        # Formato: YYYYMMDD-nombre-idioma.xliff
+        # Formato: YYYYMMDD-nombre{separador}idioma.xliff
         fecha_str = fecha.strftime("%Y%m%d")
-        nombre_archivo = f"{fecha_str}-{nombre_base}-{config_idioma.codigo_archivo}.xliff"
+        sep = config_idioma.separador_archivo
+        nombre_archivo = f"{fecha_str}-{nombre_base}{sep}{config_idioma.codigo_archivo}.xliff"
 
         # Ruta completa: Idiomas/carpeta_idioma/archivo.xliff
         ruta_completa = self.base_dir / config_idioma.carpeta / nombre_archivo
+        self._validar_ruta_segura(ruta_completa)
 
         return str(ruta_completa)
 
@@ -67,6 +85,7 @@ class FileNaming:
             ruta_archivo: Ruta completa del archivo
         """
         directorio = Path(ruta_archivo).parent
+        self._validar_ruta_segura(directorio)
         directorio.mkdir(parents=True, exist_ok=True)
 
     def obtener_ultimo_archivo(
@@ -89,9 +108,10 @@ class FileNaming:
         if not carpeta.exists():
             return None
 
-        patron = f"*-{config_idioma.codigo_archivo}.xliff"
+        sep = config_idioma.separador_archivo
+        patron = f"*{sep}{config_idioma.codigo_archivo}.xliff"
         if nombre_base:
-            patron = f"*-{nombre_base}-{config_idioma.codigo_archivo}.xliff"
+            patron = f"*-{nombre_base}{sep}{config_idioma.codigo_archivo}.xliff"
 
         archivos = list(carpeta.glob(patron))
 
@@ -118,5 +138,6 @@ class FileNaming:
         if not carpeta.exists():
             return []
 
-        patron = f"*-{config_idioma.codigo_archivo}.xliff"
+        sep = config_idioma.separador_archivo
+        patron = f"*{sep}{config_idioma.codigo_archivo}.xliff"
         return [str(f) for f in carpeta.glob(patron)]

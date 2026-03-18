@@ -31302,11 +31302,11 @@ The Docebo team&lt;br/&gt;
 	</trans-unit>
 	<trans-unit id="Looks like there's nothing for you to do in this area right now" extradata="flow">
 		<source><![CDATA[Looks like there's nothing for you to do in this area right now]]></source>
-		<target><![CDATA[Sembla que ara mateix no tens res a fer en aquesta àrea]]></target>
+		<target><![CDATA[ ]]></target>
 	</trans-unit>
 	<trans-unit id="Looks like there’s nothing for you to do in this area right now" extradata="flow">
 		<source><![CDATA[Looks like there’s nothing for you to do in this area right now]]></source>
-		<target><![CDATA[Sembla que ara mateix no tens res a fer en aquesta àrea]]></target>
+		<target><![CDATA[ ]]></target>
 	</trans-unit>
 	<trans-unit id="Loop" extradata="flow">
 		<source><![CDATA[Loop]]></source>
@@ -31838,7 +31838,7 @@ The Docebo team&lt;br/&gt;
 	</trans-unit>
 	<trans-unit id="Whoops, there's nothing here" extradata="flow">
 		<source><![CDATA[Whoops, there's nothing here]]></source>
-		<target><![CDATA[Vaja, aquí no hi ha res]]></target>
+		<target><![CDATA[ ]]></target>
 	</trans-unit>
 	<trans-unit id="You are enrolled in the course waiting list. Your administrator has to approve your enrollment" extradata="flow">
 		<source><![CDATA[You are enrolled in the course waiting list. Your administrator has to approve your enrollment.]]></source>
@@ -44498,7 +44498,7 @@ Depending on the number of selected users, this process may be running in the ba
 	</trans-unit>
 	<trans-unit id="Whoops, there’s nothing here" extradata="microsoft_teams">
 		<source><![CDATA[Whoops, there is nothing here]]></source>
-		<target><![CDATA[Vaja, aquí no hi ha res]]></target>
+		<target><![CDATA[ ]]></target>
 	</trans-unit>
 	<trans-unit id="Whoops, there’s nothing here yet" extradata="microsoft_teams">
 		<source><![CDATA[Whoops, there is nothing here yet]]></source>
@@ -47338,7 +47338,7 @@ Depending on the number of selected users, this process may be running in the ba
 	</trans-unit>
 	<trans-unit id="Whoops, there is nothing here" extradata="mobile">
 		<source><![CDATA[Whoops, there's nothing here]]></source>
-		<target><![CDATA[Vaja, aquí no hi ha res]]></target>
+		<target><![CDATA[ ]]></target>
 	</trans-unit>
 	<trans-unit id="Write your answer here" extradata="mobile">
 		<source><![CDATA[Write your answer here]]></source>
@@ -59602,11 +59602,11 @@ but the schedules configured for the report &lt;b&gt;won't be migrated&lt;/b&gt;
 	</trans-unit>
 	<trans-unit id="Looks like there's nothing for you to do in this area right now." extradata="report">
 		<source><![CDATA[Looks like there's nothing for you to do in this area right now.]]></source>
-		<target><![CDATA[Sembla que ara mateix no tens res a fer en aquesta àrea.]]></target>
+		<target><![CDATA[ ]]></target>
 	</trans-unit>
 	<trans-unit id="Looks like there’s nothing for you to do in this area right now." extradata="report">
 		<source><![CDATA[Looks like there’s nothing for you to do in this area right now.]]></source>
-		<target><![CDATA[Sembla que ara mateix no tens res a fer en aquesta àrea.]]></target>
+		<target><![CDATA[ ]]></target>
 	</trans-unit>
 	<trans-unit id="Manage report details and properties" extradata="report">
 		<source><![CDATA[Manage report details and properties]]></source>

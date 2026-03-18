@@ -5,7 +5,6 @@ Migracion de checkpoints JSON legacy a base de datos SQLite.
 """
 
 import json
-import os
 from pathlib import Path
 from typing import Dict, List, Tuple
 

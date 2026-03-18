@@ -1,20 +1,19 @@
 # Dependencias para el Traductor XLIFF
 
 # Para una mejor experiencia con barra de progreso
-tqdm>=4.66.0
+tqdm>=4.66.0,<5.0.0
 
 # Traductor simple (gratis, sin API key)
-deep-translator>=1.11.0
+deep-translator>=1.11.0,<2.0.0
 
-# Opción profesional 1: Google Cloud Translate (Gratis con límites, requiere cuenta Google Cloud)
-google-cloud-translate>=3.12.0
+# Opción profesional 1: Google Cloud Translate (no usada actualmente)
+# google-cloud-translate>=3.12.0
 
-# Opción profesional 2: DeepL (Mejor calidad, requiere API key de pago)
-deepl>=1.16.0
+# Opción profesional 2: DeepL (no usada actualmente)
+# deepl>=1.16.0
 
 # Librerías estándar (ya incluidas en Python)
 # - xml.etree.ElementTree
 # - json
 # - argparse
 # - pathlib
-

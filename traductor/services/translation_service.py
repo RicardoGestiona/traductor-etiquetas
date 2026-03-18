@@ -7,11 +7,12 @@ Coordina todos los componentes del sistema para realizar traducciones
 completas o incrementales de archivos XLIFF.
 """
 
+import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, List, Optional
+from typing import List, Optional, Tuple
 
 try:
     from tqdm import tqdm
@@ -21,7 +22,7 @@ except ImportError:
     TQDM_AVAILABLE = False
 
 from traductor.config.idiomas import ConfigIdioma, obtener_config_idioma
-from traductor.core.base_translator import crear_traductor, BaseTranslator
+from traductor.core.base_translator import crear_traductor, BaseTranslator, PLACEHOLDER_PATTERN
 from traductor.core.xliff_parser import XLIFFParser
 from traductor.database.db_manager import DatabaseManager
 from traductor.services.incremental_detector import IncrementalDetector, ResultadoDeteccion
@@ -43,6 +44,20 @@ class ResultadoTraduccion:
     pendientes: int
     duracion_segundos: float
     exitoso: bool
+
+
+@dataclass
+class ContextoFinalizacion:
+    """Contexto agrupado para finalizar una traduccion."""
+    parser: object
+    resultado_deteccion: object
+    config_idioma: object
+    archivo_entrada: str
+    archivo_salida: str
+    traducciones_pendientes: List[Tuple[str, str]]
+    nuevas_traducciones: List[Tuple[str, str]]
+    inicio: float
+    fin: float
 
 
 class TranslationService:
@@ -78,7 +93,6 @@ class TranslationService:
         self.logger = get_logger()
 
         self._traductor: Optional[BaseTranslator] = None
-        self._progreso_callback: Optional[Callable[[int, int], None]] = None
 
     def traducir(
         self,
@@ -116,10 +130,18 @@ class TranslationService:
             parser, resultado_deteccion, config_idioma
         )
 
-        resultado = self._finalizar_traduccion(
-            parser, resultado_deteccion, config_idioma, archivo_entrada, archivo_salida,
-            traducciones_pendientes, nuevas_traducciones, inicio, time.time()
+        contexto = ContextoFinalizacion(
+            parser=parser,
+            resultado_deteccion=resultado_deteccion,
+            config_idioma=config_idioma,
+            archivo_entrada=archivo_entrada,
+            archivo_salida=archivo_salida,
+            traducciones_pendientes=traducciones_pendientes,
+            nuevas_traducciones=nuevas_traducciones,
+            inicio=inicio,
+            fin=time.time()
         )
+        resultado = self._finalizar_traduccion(contexto)
 
         self._mostrar_resumen(resultado)
         return resultado
@@ -148,6 +170,7 @@ class TranslationService:
         self.logger.info(f"Cargando: {archivo_entrada}")
         parser = XLIFFParser()
         doc = parser.cargar(archivo_entrada)
+        parser.actualizar_target_language(config_idioma.codigo)
         self.logger.info(f"Total de unidades: {doc.total_unidades}")
         return parser, archivo_salida
 
@@ -185,8 +208,7 @@ class TranslationService:
         resultado_deteccion: ResultadoDeteccion,
         config_idioma: ConfigIdioma
     ) -> tuple:
-        """Traduce etiquetas nuevas con barra de progreso."""
-        errores = 0
+        """Orquesta la traduccion de etiquetas nuevas."""
         traducciones_pendientes = []
         nuevas_traducciones = []
         buffer_cache = []
@@ -196,112 +218,180 @@ class TranslationService:
             return traducciones_pendientes, nuevas_traducciones
 
         self.logger.info(f"Traduciendo {total_nuevas} etiquetas nuevas...")
-
-        if TQDM_AVAILABLE:
-            iterador = tqdm(
-                resultado_deteccion.etiquetas_nuevas,
-                desc="Traduciendo",
-                unit=" etiquetas"
-            )
-        else:
-            iterador = resultado_deteccion.etiquetas_nuevas
+        iterador = self._crear_iterador_progreso(resultado_deteccion.etiquetas_nuevas, total_nuevas)
 
         for idx, unit in enumerate(iterador, 1):
             texto_original = unit.target
-
-            # Validación defensiva: ignorar textos vacíos
             if not texto_original or not texto_original.strip():
-                self.logger.debug(f"Ignorando etiqueta vacía: {unit.id}")
+                self.logger.debug(f"Ignorando etiqueta vacia: {unit.id}")
                 continue
 
-            try:
-                traduccion = self._traductor.traducir(texto_original)
+            self._traducir_unidad(
+                unit, texto_original, parser, config_idioma,
+                traducciones_pendientes, nuevas_traducciones, buffer_cache
+            )
+            self._aplicar_pausa_rate_limit(idx, total_nuevas)
 
-                if traduccion is None or traduccion.strip() == "":
-                    traducciones_pendientes.append(
-                        (texto_original, "API devolvio respuesta vacia")
-                    )
-                    errores += 1
-                    self.logger.warning(f"API vacia para: {texto_original[:50]}...")
-                else:
-                    parser.actualizar_traduccion(unit, traduccion)
-                    nuevas_traducciones.append((texto_original, traduccion))
-                    buffer_cache.append((texto_original, traduccion))
-
-                    if len(buffer_cache) >= self.guardar_cache_cada_n:
-                        self.db.guardar_lote_cache(config_idioma.codigo, buffer_cache)
-                        self.logger.info(f"Cache parcial guardado: {len(buffer_cache)} traducciones")
-                        buffer_cache = []
-
-                if idx % self.pausa_cada_n == 0:
-                    time.sleep(self.delay_pausa)
-
-            except Exception as e:
-                errores += 1
-                traducciones_pendientes.append((texto_original, str(e)))
-                self.logger.error(f"Error en unidad {unit.id}: {e}")
-
-            if not TQDM_AVAILABLE and idx % 100 == 0:
-                self.logger.progress(idx, total_nuevas)
-
-        if buffer_cache:
-            self.db.guardar_lote_cache(config_idioma.codigo, buffer_cache)
-            self.logger.info(f"Cache final guardado: {len(buffer_cache)} traducciones")
-
+        self._guardar_cache_incremental(buffer_cache, config_idioma, es_final=True)
         return traducciones_pendientes, nuevas_traducciones
 
-    def _finalizar_traduccion(
-        self,
-        parser: XLIFFParser,
-        resultado_deteccion: ResultadoDeteccion,
-        config_idioma: ConfigIdioma,
-        archivo_entrada: str,
-        archivo_salida: str,
-        traducciones_pendientes: list,
-        nuevas_traducciones: list,
-        inicio: float,
-        fin: float
-    ) -> ResultadoTraduccion:
+    def _crear_iterador_progreso(self, etiquetas: list, total: int):
+        """Encapsula la creacion del iterador con barra de progreso."""
+        if TQDM_AVAILABLE:
+            return tqdm(etiquetas, desc="Traduciendo", unit=" etiquetas")
+        return etiquetas
+
+    def _traducir_unidad(
+        self, unit, texto_original: str, parser: XLIFFParser,
+        config_idioma: ConfigIdioma, pendientes: list,
+        nuevas: list, buffer_cache: list
+    ) -> None:
+        """Traduce una unidad individual, valida resultado y gestiona buffer."""
+        try:
+            traduccion = self._traductor.traducir(texto_original)
+
+            if traduccion is None or traduccion.strip() == "":
+                pendientes.append((texto_original, "API devolvio respuesta vacia"))
+                self.logger.warning(f"API vacia para: {texto_original[:50]}...")
+                return
+
+            if traduccion == texto_original:
+                pendientes.append((texto_original, "API retorno texto identico"))
+                self.logger.warning(f"Traduccion identica al original: {texto_original[:50]}...")
+                return
+
+            placeholders_origen = set(PLACEHOLDER_PATTERN.findall(texto_original))
+            if placeholders_origen:
+                placeholders_traduccion = set(PLACEHOLDER_PATTERN.findall(traduccion))
+                perdidos = placeholders_origen - placeholders_traduccion
+                if perdidos:
+                    # Reintento con tokens alfanumericos [[PH0]], [[PH1]]...
+                    self.logger.warning(
+                        f"Placeholders perdidos, reintentando con tokens alternativos: {texto_original[:50]}..."
+                    )
+                    traduccion = self._reintentar_con_tokens_alt(texto_original)
+                    if traduccion is None:
+                        pendientes.append((texto_original, f"Placeholders perdidos en traduccion: {perdidos}"))
+                        return
+
+            parser.actualizar_traduccion(unit, traduccion)
+            nuevas.append((texto_original, traduccion))
+            buffer_cache.append((texto_original, traduccion))
+
+            if len(buffer_cache) >= self.guardar_cache_cada_n:
+                self._guardar_cache_incremental(buffer_cache, config_idioma, es_final=False)
+                buffer_cache.clear()
+
+        except Exception as e:
+            pendientes.append((texto_original, str(e)))
+            self.logger.error(f"Error en unidad {unit.id}: {e}")
+
+    def _reintentar_con_tokens_alt(self, texto: str) -> Optional[str]:
+        """
+        Reintenta traduccion usando tokens alfanumericos [[PH0]] en lugar
+        de Unicode. Fallback cuando Google Translate corrompe los tokens.
+
+        Args:
+            texto: Texto original con {placeholders}
+
+        Returns:
+            Texto traducido con placeholders restaurados, o None si falla
+        """
+        placeholders = PLACEHOLDER_PATTERN.findall(texto)
+        if not placeholders:
+            return None
+
+        # Proteger con tokens alfanumericos
+        texto_protegido = texto
+        for i, ph in enumerate(placeholders):
+            texto_protegido = texto_protegido.replace(ph, f"[[PH{i}]]", 1)
+
+        # Traducir
+        resultado = self._traductor._traducir_interno(texto_protegido)
+        if resultado is None:
+            return None
+
+        # Restaurar placeholders
+        for i, ph in enumerate(placeholders):
+            variantes = [f"[[PH{i}]]", f"[[ PH{i} ]]", f"[[PH {i}]]", f"[[ PH{i}]]"]
+            for variante in variantes:
+                if variante in resultado:
+                    resultado = resultado.replace(variante, ph, 1)
+                    break
+
+        # Validar que todos los placeholders fueron restaurados
+        placeholders_resultado = set(PLACEHOLDER_PATTERN.findall(resultado))
+        if set(placeholders) - placeholders_resultado:
+            self.logger.error(
+                f"Tokens alternativos tambien fallaron: {texto[:50]}..."
+            )
+            return None
+
+        self.logger.info("Reintento con tokens alternativos exitoso")
+        return resultado
+
+    def _guardar_cache_incremental(
+        self, buffer: list, config_idioma: ConfigIdioma, es_final: bool
+    ) -> None:
+        """Guarda buffer de cache parcial o final."""
+        if not buffer:
+            return
+        self.db.guardar_lote_cache(config_idioma.codigo, buffer)
+        tipo = "final" if es_final else "parcial"
+        self.logger.info(f"Cache {tipo} guardado: {len(buffer)} traducciones")
+
+    def _aplicar_pausa_rate_limit(self, idx: int, total: int) -> None:
+        """Aplica pausa cada N traducciones y muestra progreso sin tqdm."""
+        if idx % self.pausa_cada_n == 0:
+            time.sleep(self.delay_pausa)
+        if not TQDM_AVAILABLE and idx % 100 == 0:
+            self.logger.progress(idx, total)
+
+    def _finalizar_traduccion(self, contexto: ContextoFinalizacion) -> ResultadoTraduccion:
         """Guarda archivo y registra sesion en BD."""
-        if traducciones_pendientes:
+        if contexto.traducciones_pendientes:
             self.db.guardar_lote_pendientes(
-                config_idioma.codigo,
-                traducciones_pendientes,
-                archivo_entrada
+                contexto.config_idioma.codigo,
+                contexto.traducciones_pendientes,
+                contexto.archivo_entrada
             )
             self.logger.warning(
-                f"Registradas {len(traducciones_pendientes)} traducciones pendientes para reintentar"
+                f"Registradas {len(contexto.traducciones_pendientes)} traducciones pendientes para reintentar"
             )
 
-        self.logger.info(f"Guardando: {archivo_salida}")
-        parser.guardar(archivo_salida)
+        # Aplicar cabecera custom si el idioma la define
+        if contexto.config_idioma.cabecera_custom:
+            contexto.parser.reemplazar_cabecera(contexto.config_idioma.cabecera_custom)
 
-        duracion = fin - inicio
-        errores = len(traducciones_pendientes)
+        self.logger.info(f"Guardando: {contexto.archivo_salida}")
+        contexto.parser.guardar(contexto.archivo_salida)
+
+        duracion = contexto.fin - contexto.inicio
+        errores = len(contexto.traducciones_pendientes)
 
         self.db.registrar_traduccion(
             idioma_origen="en",
-            idioma_destino=config_idioma.codigo,
-            fichero_original=archivo_entrada,
-            fichero_destino=archivo_salida,
-            total_etiquetas=resultado_deteccion.total_etiquetas,
-            total_traducidas=resultado_deteccion.total_etiquetas - errores,
-            total_nuevas=len(nuevas_traducciones),
-            total_reutilizadas=resultado_deteccion.total_en_cache,
+            idioma_destino=contexto.config_idioma.codigo,
+            fichero_original=contexto.archivo_entrada,
+            fichero_destino=contexto.archivo_salida,
+            total_etiquetas=contexto.resultado_deteccion.total_etiquetas,
+            total_traducidas=contexto.resultado_deteccion.total_etiquetas - errores,
+            total_nuevas=len(contexto.nuevas_traducciones),
+            total_reutilizadas=contexto.resultado_deteccion.total_en_cache,
             duracion_segundos=duracion,
             estado="completado" if errores == 0 else "con_errores"
         )
 
         return ResultadoTraduccion(
-            archivo_origen=archivo_entrada,
-            archivo_destino=archivo_salida,
-            idioma_destino=config_idioma.nombre,
-            total_etiquetas=resultado_deteccion.total_etiquetas,
-            traducidas=resultado_deteccion.total_etiquetas - errores,
-            nuevas=len(nuevas_traducciones),
-            reutilizadas=resultado_deteccion.total_en_cache,
+            archivo_origen=contexto.archivo_entrada,
+            archivo_destino=contexto.archivo_salida,
+            idioma_destino=contexto.config_idioma.nombre,
+            total_etiquetas=contexto.resultado_deteccion.total_etiquetas,
+            traducidas=contexto.resultado_deteccion.total_etiquetas - errores,
+            nuevas=len(contexto.nuevas_traducciones),
+            reutilizadas=contexto.resultado_deteccion.total_en_cache,
             errores=errores,
-            pendientes=len(traducciones_pendientes),
+            pendientes=len(contexto.traducciones_pendientes),
             duracion_segundos=duracion,
             exitoso=errores == 0
         )

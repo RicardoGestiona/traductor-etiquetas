@@ -11,6 +11,7 @@ Preserva el formato exacto del archivo original incluyendo:
 
 import re
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, Iterator, List, Optional, Tuple
 
@@ -23,6 +24,8 @@ class TransUnit:
     target: str
     linea_idx: int  # Indice de linea en el archivo
     linea_original: str  # Linea original completa
+    pos_inicio: int = 0  # Posicion de inicio del target en el contenido
+    pos_fin: int = 0  # Posicion de fin del target en el contenido
 
 
 @dataclass
@@ -35,6 +38,10 @@ class XLIFFDocument:
 
 class XLIFFParser:
     """Parser XLIFF que preserva el formato exacto del archivo."""
+
+    # Secuencia que cierra un bloque CDATA prematuramente
+    CDATA_END_TOKEN = ']]>'
+    CDATA_END_ESCAPE = ']]]]><![CDATA[>'
 
     # Patron para extraer ID de trans-unit
     PATTERN_TRANS_UNIT_ID = re.compile(r'<trans-unit\s+id="([^"]*)"')
@@ -136,14 +143,16 @@ class XLIFFParser:
             source=texto_target,
             target=texto_target,
             linea_idx=linea_idx,
-            linea_original=f'<target><![CDATA[{texto_target}]]></target>'
+            linea_original=f'<target><![CDATA[{texto_target}]]></target>',
+            pos_inicio=target_match.start(),
+            pos_fin=target_match.end()
         )
 
     def actualizar_traduccion(self, trans_unit: TransUnit, nueva_traduccion: str) -> None:
         """
         Actualiza la traduccion de una unidad en el documento.
 
-        Soporta etiquetas target que abarcan multiples lineas.
+        Usa reemplazo posicional exacto para evitar colisiones con targets duplicados.
 
         Args:
             trans_unit: Unidad a actualizar
@@ -152,18 +161,44 @@ class XLIFFParser:
         if self._documento is None:
             raise ValueError("No hay documento cargado")
 
-        # Reconstruir contenido completo
         contenido = '\n'.join(self._documento.lineas)
 
-        # Reemplazar el target original por el nuevo
-        target_original = f'<target><![CDATA[{trans_unit.target}]]></target>'
-        target_nuevo = f'<target><![CDATA[{nueva_traduccion}]]></target>'
+        # Sanitizar CDATA: escapar secuencia ]]> para evitar inyeccion XML
+        traduccion_safe = nueva_traduccion.replace(
+            self.CDATA_END_TOKEN, self.CDATA_END_ESCAPE
+        )
 
-        contenido = contenido.replace(target_original, target_nuevo, 1)
+        target_nuevo = f'<target><![CDATA[{traduccion_safe}]]></target>'
 
-        # Actualizar las lineas
+        # Reemplazo posicional exacto
+        contenido = (
+            contenido[:trans_unit.pos_inicio]
+            + target_nuevo
+            + contenido[trans_unit.pos_fin:]
+        )
+
+        # Recalcular offsets de unidades posteriores
+        delta = len(target_nuevo) - (trans_unit.pos_fin - trans_unit.pos_inicio)
+        self._actualizar_offsets_posteriores(trans_unit, delta)
+
         self._documento.lineas = contenido.split('\n')
         trans_unit.target = nueva_traduccion
+
+    def _actualizar_offsets_posteriores(self, unit_actualizada: TransUnit, delta: int) -> None:
+        """
+        Recalcula posiciones de unidades posteriores tras un reemplazo.
+
+        Args:
+            unit_actualizada: Unidad que fue modificada
+            delta: Diferencia de longitud entre texto nuevo y original
+        """
+        if delta == 0:
+            return
+
+        for unit in self._documento.trans_units:
+            if unit.pos_inicio > unit_actualizada.pos_inicio:
+                unit.pos_inicio += delta
+                unit.pos_fin += delta
 
     def guardar(self, ruta_salida: str) -> None:
         """
@@ -205,6 +240,52 @@ class XLIFFParser:
             raise ValueError("No hay documento cargado")
 
         return {unit.id: unit.target for unit in self._documento.trans_units}
+
+    def actualizar_target_language(self, codigo_idioma: str) -> None:
+        """Actualiza el atributo target-language en la cabecera del documento."""
+        if self._documento is None:
+            raise ValueError("No hay documento cargado")
+
+        pattern = re.compile(r'target-language="[^"]*"')
+        for i, linea in enumerate(self._documento.lineas[:10]):
+            if 'target-language=' in linea:
+                self._documento.lineas[i] = pattern.sub(
+                    f'target-language="{codigo_idioma}"', linea
+                )
+                break
+
+    def reemplazar_cabecera(self, cabecera_custom: str) -> None:
+        """
+        Reemplaza la cabecera del documento XLIFF con una cabecera personalizada.
+
+        Sustituye todas las lineas desde el inicio hasta <body> (inclusive).
+        El placeholder {date} se reemplaza con la fecha actual (YYYY-MM-DD).
+
+        IMPORTANTE: Llamar DESPUES de todas las traducciones, antes de guardar.
+
+        Args:
+            cabecera_custom: Cabecera con placeholder {date}
+        """
+        if self._documento is None:
+            raise ValueError("No hay documento cargado")
+
+        fecha_hoy = datetime.now().strftime("%Y-%m-%d")
+        cabecera_final = cabecera_custom.replace("{date}", fecha_hoy)
+        lineas_cabecera = cabecera_final.split('\n')
+
+        # Encontrar donde termina la cabecera original (linea con <body>)
+        idx_body = None
+        for i, linea in enumerate(self._documento.lineas[:20]):
+            if '<body>' in linea or '<body' in linea:
+                idx_body = i
+                break
+
+        if idx_body is None:
+            return
+
+        # Reemplazar cabecera original por la custom
+        contenido_body = self._documento.lineas[idx_body + 1:]
+        self._documento.lineas = lineas_cabecera + contenido_body
 
     @property
     def total_unidades(self) -> int:

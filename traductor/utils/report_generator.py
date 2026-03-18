@@ -63,24 +63,18 @@ class ReportGenerator:
 
     def _obtener_errores_pendientes(self) -> List[ErrorTraduccion]:
         """Obtiene errores pendientes de la base de datos."""
-        errores = []
-        with self.db._conexion() as conn:
-            cursor = conn.execute("""
-                SELECT idioma_destino, texto_origen, motivo_fallo,
-                       archivo_origen, fecha_fallo, reintentos
-                FROM traducciones_pendientes
-                ORDER BY fecha_fallo DESC
-            """)
-            for row in cursor.fetchall():
-                errores.append(ErrorTraduccion(
-                    idioma=row[0],
-                    texto_origen=row[1] or "(vacio)",
-                    motivo=row[2],
-                    archivo=row[3],
-                    fecha=row[4],
-                    reintentos=row[5]
-                ))
-        return errores
+        rows = self.db.obtener_errores_pendientes_detallado()
+        return [
+            ErrorTraduccion(
+                idioma=row["idioma_destino"],
+                texto_origen=row["texto_origen"] or "(vacio)",
+                motivo=row["motivo_fallo"],
+                archivo=row["archivo_origen"],
+                fecha=row["fecha_fallo"],
+                reintentos=row["reintentos"]
+            )
+            for row in rows
+        ]
 
     def _generar_markdown_errores(self, errores: List[ErrorTraduccion]) -> str:
         """Genera contenido Markdown del informe de errores."""

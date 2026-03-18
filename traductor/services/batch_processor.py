@@ -7,7 +7,6 @@ Monitorea la carpeta traduccion-pendiente/ y traduce automáticamente
 a catalán, gallego y euskera.
 """
 
-import os
 import time
 import shutil
 from pathlib import Path
@@ -63,6 +62,10 @@ class BatchProcessor:
         # Carpeta para archivos procesados
         self.carpeta_procesados = self.carpeta_entrada / "_procesados"
 
+        # Carpeta para archivar originales en inglés
+        self.carpeta_archivo = Path("xliffs-english-archivo")
+        self.carpeta_archivo.mkdir(parents=True, exist_ok=True)
+
     def detectar_archivos_pendientes(self) -> List[Path]:
         """
         Detecta archivos XLIFF pendientes de traducir.
@@ -95,6 +98,7 @@ class BatchProcessor:
             base_dir_salida=str(self.carpeta_salida)
         )
 
+        self._archivar_original(archivo)
         idiomas_ok, errores = self._traducir_a_todos_idiomas(archivo, service)
 
         if self.mover_procesados and len(idiomas_ok) == len(self.IDIOMAS_DESTINO):
@@ -106,6 +110,25 @@ class BatchProcessor:
             exitoso=len(errores) == 0,
             errores=errores
         )
+
+    def _archivar_original(self, archivo: Path) -> None:
+        """Copia el fichero original en inglés a xliffs-english-archivo/ con fecha."""
+        from datetime import date
+        fecha = date.today().strftime("%Y%m%d")
+        nombre_base = f"{fecha}-xliff-english.xliff"
+        destino = self.carpeta_archivo / nombre_base
+
+        if destino.exists():
+            contador = 2
+            while True:
+                nombre_sufijo = f"{fecha}-xliff-english-{contador}.xliff"
+                destino = self.carpeta_archivo / nombre_sufijo
+                if not destino.exists():
+                    break
+                contador += 1
+
+        shutil.copy2(str(archivo), str(destino))
+        self.logger.info(f"Original archivado en: {destino}")
 
     def _traducir_a_todos_idiomas(
         self,

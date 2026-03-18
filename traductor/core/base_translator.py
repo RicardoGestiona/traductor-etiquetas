@@ -4,9 +4,19 @@
 Clase base abstracta para traductores.
 """
 
+import re
 import time
 from abc import ABC, abstractmethod
 from typing import Optional
+
+PLACEHOLDER_PATTERN = re.compile(r'\{[^}]+\}')
+# Token format: ⟪N⟫ using Unicode mathematical double angle brackets (U+27EA/U+27EB)
+# Google Translate preserves these because they are not natural language characters
+_PH_LEFT = '\u27ea'
+_PH_RIGHT = '\u27eb'
+_PH_TOKEN_PATTERN = re.compile(
+    rf'{_PH_LEFT}\s*(\d+)\s*{_PH_RIGHT}'
+)
 
 from traductor.config.idiomas import ConfigIdioma, IDIOMA_ORIGEN_DEFAULT
 from traductor.utils.logger import get_logger
@@ -56,26 +66,60 @@ class BaseTranslator(ABC):
         """
         pass
 
-    def traducir(self, texto: str) -> str:
+    def traducir(self, texto: str) -> Optional[str]:
         """
         Traduce un texto con manejo de reintentos.
+        Protege variables {placeholder} automaticamente.
 
         Args:
             texto: Texto a traducir
 
         Returns:
-            Texto traducido (o original si falla)
+            Texto traducido o None si falla tras todos los reintentos
         """
         if not texto or not texto.strip():
             return texto
 
+        texto_protegido, placeholders = self._proteger_placeholders(texto)
+
         for intento in range(self.reintentos):
-            resultado = self._ejecutar_traduccion_con_reintentos(texto, intento)
+            resultado = self._ejecutar_traduccion_con_reintentos(texto_protegido, intento)
             if resultado is not None:
                 self._traducciones_realizadas += 1
-                return resultado
+                return self._restaurar_placeholders(resultado, placeholders)
 
-        return texto
+        return None
+
+    def _proteger_placeholders(self, texto: str) -> tuple:
+        """Extrae {variables} y las reemplaza con tokens Unicode seguros."""
+        placeholders = PLACEHOLDER_PATTERN.findall(texto)
+        texto_protegido = texto
+        for i, ph in enumerate(placeholders):
+            texto_protegido = texto_protegido.replace(
+                ph, f"{_PH_LEFT}{i}{_PH_RIGHT}", 1
+            )
+        return texto_protegido, placeholders
+
+    def _restaurar_placeholders(self, texto: str, placeholders: list) -> str:
+        """Restaura los tokens Unicode por las variables originales."""
+        if not placeholders:
+            return texto
+
+        def reemplazar_token(match):
+            idx = int(match.group(1))
+            if idx < len(placeholders):
+                return placeholders[idx]
+            return match.group(0)
+
+        resultado = _PH_TOKEN_PATTERN.sub(reemplazar_token, texto)
+
+        # Fallback: si quedan tokens sin resolver, forzar por posicion
+        for i, ph in enumerate(placeholders):
+            token_exacto = f"{_PH_LEFT}{i}{_PH_RIGHT}"
+            if token_exacto in resultado:
+                resultado = resultado.replace(token_exacto, ph, 1)
+
+        return resultado
 
     def _ejecutar_traduccion_con_reintentos(self, texto: str, intento: int) -> Optional[str]:
         """Ejecuta traduccion con logica de reintentos."""
@@ -85,7 +129,7 @@ class BaseTranslator(ABC):
         except Exception as e:
             self._errores += 1
             if intento < self.reintentos - 1:
-                delay = self.delay_base * (2 ** intento)
+                delay = min(self.delay_base * (2 ** intento), 30.0)
                 self.logger.warning(
                     f"Error en intento {intento + 1}, reintentando en {delay}s..."
                 )

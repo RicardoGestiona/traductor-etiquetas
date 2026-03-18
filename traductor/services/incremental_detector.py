@@ -6,9 +6,8 @@ Detector de traducciones incrementales.
 Compara archivos XLIFF para identificar etiquetas nuevas o modificadas.
 """
 
-import hashlib
 from dataclasses import dataclass
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Tuple
 
 from traductor.core.xliff_parser import XLIFFParser, TransUnit
 from traductor.database.db_manager import DatabaseManager
@@ -105,66 +104,6 @@ class IncrementalDetector:
                 etiquetas_nuevas.append(unit)
 
         return etiquetas_nuevas, etiquetas_en_cache
-
-    def comparar_archivos(
-        self,
-        archivo_nuevo: str,
-        archivo_anterior: str
-    ) -> Dict[str, List[str]]:
-        """
-        Compara dos archivos XLIFF para detectar diferencias.
-
-        Args:
-            archivo_nuevo: Ruta al archivo nuevo
-            archivo_anterior: Ruta al archivo de referencia
-
-        Returns:
-            Diccionario con listas de IDs nuevos, eliminados y modificados
-        """
-        doc_nuevo, doc_anterior = self._cargar_y_extraer_ids(archivo_nuevo, archivo_anterior)
-
-        ids_nuevo = {unit.id for unit in doc_nuevo.trans_units}
-        ids_anterior = {unit.id for unit in doc_anterior.trans_units}
-        contenido_nuevo = {unit.id: unit.target for unit in doc_nuevo.trans_units}
-        contenido_anterior = {unit.id: unit.target for unit in doc_anterior.trans_units}
-
-        return self._detectar_diferencias(
-            ids_nuevo, ids_anterior, contenido_nuevo, contenido_anterior
-        )
-
-    def _cargar_y_extraer_ids(self, archivo_nuevo: str, archivo_anterior: str) -> Tuple:
-        """Carga dos archivos XLIFF."""
-        parser_nuevo = XLIFFParser()
-        parser_anterior = XLIFFParser()
-
-        doc_nuevo = parser_nuevo.cargar(archivo_nuevo)
-        doc_anterior = parser_anterior.cargar(archivo_anterior)
-
-        return doc_nuevo, doc_anterior
-
-    def _detectar_diferencias(
-        self,
-        ids_nuevo: Set[str],
-        ids_anterior: Set[str],
-        contenido_nuevo: Dict[str, str],
-        contenido_anterior: Dict[str, str]
-    ) -> Dict[str, List[str]]:
-        """Calcula diferencias entre conjuntos de IDs."""
-        nuevos = ids_nuevo - ids_anterior
-        eliminados = ids_anterior - ids_nuevo
-        comunes = ids_nuevo & ids_anterior
-
-        modificados = [
-            id_unit for id_unit in comunes
-            if contenido_nuevo.get(id_unit) != contenido_anterior.get(id_unit)
-        ]
-
-        return {
-            "nuevos": list(nuevos),
-            "eliminados": list(eliminados),
-            "modificados": modificados,
-            "sin_cambios": list(comunes - set(modificados))
-        }
 
     def generar_resumen(self, resultado: ResultadoDeteccion) -> str:
         """

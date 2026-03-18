@@ -4,11 +4,30 @@
 Sistema de logging para el traductor XLIFF.
 """
 
+import json
 import logging
 import sys
+import traceback
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+
+
+class JsonFormatter(logging.Formatter):
+    """Formatter que emite logs en JSON estructurado para file handlers."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        log_entry = {
+            "timestamp": datetime.fromtimestamp(record.created).isoformat(),
+            "level": record.levelname,
+            "message": record.getMessage(),
+            "module": record.module,
+            "function": record.funcName,
+            "line": record.lineno,
+        }
+        if record.exc_info and record.exc_info[0] is not None:
+            log_entry["exception"] = traceback.format_exception(*record.exc_info)
+        return json.dumps(log_entry, ensure_ascii=False)
 
 
 class Logger:
@@ -62,14 +81,9 @@ class Logger:
         fecha = datetime.now().strftime("%Y%m%d_%H%M%S")
         log_file = log_path / f"traductor_{fecha}.log"
 
-        file_formatter = logging.Formatter(
-            "%(asctime)s - %(levelname)s - %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S"
-        )
-
         self._file_handler = logging.FileHandler(log_file, encoding="utf-8")
         self._file_handler.setLevel(logging.DEBUG)
-        self._file_handler.setFormatter(file_formatter)
+        self._file_handler.setFormatter(JsonFormatter())
         self._logger.addHandler(self._file_handler)
 
     def set_level(self, level: int) -> None:

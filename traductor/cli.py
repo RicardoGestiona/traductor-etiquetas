@@ -16,10 +16,14 @@ Comandos disponibles:
 import argparse
 import os
 import sys
+from pathlib import Path
 from typing import List, Optional
 
 from traductor import __version__
-from traductor.config.idiomas import listar_idiomas, obtener_config_idioma, IDIOMAS_SOPORTADOS
+from traductor.config.idiomas import (
+    listar_idiomas, obtener_config_idioma, obtener_config_por_codigo,
+    obtener_nombre_por_codigo, IDIOMAS_SOPORTADOS
+)
 from traductor.database.db_manager import DatabaseManager
 from traductor.database.migrations import CheckpointMigrator
 from traductor.services.translation_service import TranslationService
@@ -50,11 +54,18 @@ def cmd_traducir(args: argparse.Namespace) -> int:
 
 
 def _validar_archivo_entrada(archivo: str) -> bool:
-    """Valida que el archivo de entrada existe."""
+    """Valida que el archivo de entrada existe y esta dentro del directorio de trabajo."""
     logger = get_logger()
     if not os.path.exists(archivo):
         logger.error(f"El archivo '{archivo}' no existe")
         return False
+
+    ruta_resuelta = Path(archivo).resolve()
+    cwd = Path.cwd().resolve()
+    if not str(ruta_resuelta).startswith(str(cwd)):
+        logger.error(f"Path traversal detectado: '{archivo}' esta fuera del directorio de trabajo")
+        return False
+
     return True
 
 
@@ -173,7 +184,7 @@ def _mostrar_cache_estadisticas(db: DatabaseManager) -> None:
     if cache:
         logger.info("Cache de traducciones:")
         for idioma, total in cache.items():
-            nombre_idioma = _obtener_nombre_idioma(idioma)
+            nombre_idioma = obtener_nombre_por_codigo(idioma)
             logger.info(f"  - {nombre_idioma} ({idioma}): {total} traducciones")
     else:
         logger.info("Cache de traducciones: vacio")
@@ -208,12 +219,6 @@ def _mostrar_historial_estadisticas(db: DatabaseManager) -> None:
         logger.info("  Sin historial")
 
 
-def _obtener_nombre_idioma(codigo: str) -> str:
-    """Obtiene nombre de idioma desde codigo."""
-    for nombre, cfg in IDIOMAS_SOPORTADOS.items():
-        if cfg.codigo == codigo:
-            return cfg.nombre
-    return codigo
 
 
 def cmd_listar(args: argparse.Namespace) -> int:
@@ -266,7 +271,7 @@ def _mostrar_conteo_pendientes(conteo: dict) -> None:
     total_general = 0
 
     for idioma, total in conteo.items():
-        nombre_idioma = _obtener_nombre_idioma(idioma)
+        nombre_idioma = obtener_nombre_por_codigo(idioma)
         logger.info(f"  {nombre_idioma} ({idioma}): {total} pendientes")
         total_general += total
 
@@ -329,7 +334,7 @@ def _procesar_pendientes_por_idioma(por_idioma: dict, db: DatabaseManager) -> tu
     total_fallo = 0
 
     for idioma, lista_pendientes in por_idioma.items():
-        config = _obtener_config_por_codigo(idioma)
+        config = obtener_config_por_codigo(idioma)
 
         if not config:
             logger.error(f"No se encontro configuracion para idioma: {idioma}")
@@ -349,16 +354,6 @@ def _procesar_pendientes_por_idioma(por_idioma: dict, db: DatabaseManager) -> tu
     return total_exito, total_fallo
 
 
-def _obtener_config_por_codigo(codigo_o_nombre: str) -> Optional:
-    """Obtiene config de idioma por codigo o nombre."""
-    config = obtener_config_idioma(codigo_o_nombre)
-    if config:
-        return config
-
-    for nombre, cfg in IDIOMAS_SOPORTADOS.items():
-        if cfg.codigo == codigo_o_nombre:
-            return cfg
-    return None
 
 
 def _reintentar_traduccion_unica(
@@ -386,6 +381,29 @@ def _reintentar_traduccion_unica(
     except Exception as e:
         logger.error(f"  ERROR: {texto_origen[:40]}... - {e}")
         return 0, 1
+
+
+def cmd_purgar_cache(args: argparse.Namespace) -> int:
+    """Comando para purgar cache con variables {placeholder} mal traducidas."""
+    logger = get_logger()
+    db = DatabaseManager(args.db)
+
+    logger.info("Buscando entradas de cache con variables {placeholder} mal traducidas...")
+    eliminados = db.purgar_cache_variables_traducidas()
+
+    if not eliminados:
+        logger.info("Cache limpio: no se encontraron variables mal traducidas.")
+        return 0
+
+    total = 0
+    for idioma, cantidad in eliminados.items():
+        nombre_idioma = obtener_nombre_por_codigo(idioma)
+        logger.info(f"  {nombre_idioma} ({idioma}): {cantidad} entradas eliminadas")
+        total += cantidad
+
+    logger.info(f"\nTotal purgado: {total} entradas con variables corruptas")
+    logger.info("Ejecuta la traduccion de nuevo para regenerar estas entradas correctamente.")
+    return 0
 
 
 def cmd_limpiar_pendientes(args: argparse.Namespace) -> int:
@@ -448,6 +466,7 @@ Ejemplos:
     _configurar_parser_pendientes(subparsers)
     _configurar_parser_reintentar(subparsers)
     _configurar_parser_limpiar(subparsers)
+    _configurar_parser_purgar_cache(subparsers)
 
     return parser
 
@@ -566,6 +585,17 @@ def _configurar_parser_limpiar(subparsers) -> None:
     p.add_argument("--idioma", "-i",
                    help="Filtrar por codigo de idioma (ej: ca, eu, gl)")
     p.set_defaults(func=cmd_limpiar_pendientes)
+
+
+def _configurar_parser_purgar_cache(subparsers) -> None:
+    """Configura subparser para comando 'purgar-cache'."""
+    p = subparsers.add_parser(
+        "purgar-cache",
+        help="Elimina cache con variables {placeholder} mal traducidas",
+        description="Detecta y elimina entradas de cache donde variables como "
+                    "{current}, {max} fueron traducidas incorrectamente"
+    )
+    p.set_defaults(func=cmd_purgar_cache)
 
 
 def main(argv: Optional[List[str]] = None) -> int:
