@@ -42,7 +42,7 @@ IDIOMAS_SOPORTADOS: Dict[str, ConfigIdioma] = {
             'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" '
             'xsi:schemaLocation="urn:oasis:names:tc:xliff:document:1.2 '
             'xliff-core-1.2-strict.xsd">\n'
-            '<file datatype="html" source-language="en" target-language="ca" '
+            '<file datatype="html" source-language="en" target-language="en-gb" '
             'date="{date}" original="xliff-english.xliff">\n'
             '<body>'
         )
@@ -62,7 +62,7 @@ IDIOMAS_SOPORTADOS: Dict[str, ConfigIdioma] = {
             'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" '
             'xsi:schemaLocation="urn:oasis:names:tc:xliff:document:1.2 '
             'xliff-core-1.2-strict.xsd">\n'
-            '<file datatype="html" source-language="en" target-language="eu" '
+            '<file datatype="html" source-language="en" target-language="es-419" '
             'date="{date}" original="xliff-english.xliff">\n'
             '<body>'
         )
@@ -81,7 +81,7 @@ IDIOMAS_SOPORTADOS: Dict[str, ConfigIdioma] = {
             'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" '
             'xsi:schemaLocation="urn:oasis:names:tc:xliff:document:1.2 '
             'xliff-core-1.2-strict.xsd">\n'
-            '<file datatype="html" source-language="en" target-language="gl" '
+            '<file datatype="html" source-language="en" target-language="pt-br" '
             'date="{date}" original="xliff-english.xliff">\n'
             '<body>'
         )
